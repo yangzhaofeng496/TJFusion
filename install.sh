@@ -610,12 +610,27 @@ extract_version_number() {
 
 get_expected_tjfusion_version() {
   local repo_root="$1"
-  local version_file="${repo_root}/FusionDocker/src/fusion_docker/__init__.py"
-  if [[ ! -f "$version_file" ]]; then
-    return 1
+  local version_conf="${repo_root}/FusionDocker/src/fusion_docker/version.conf"
+  local init_file="${repo_root}/FusionDocker/src/fusion_docker/__init__.py"
+  local parsed=""
+
+  if [[ -f "$version_conf" ]]; then
+    parsed="$(awk -F'=' '/^[[:space:]]*version[[:space:]]*=/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }' "$version_conf")"
+    if [[ -n "$parsed" ]]; then
+      echo "$parsed"
+      return 0
+    fi
   fi
 
-  awk -F'"' '/^__version__[[:space:]]*=[[:space:]]*"/ { print $2; exit }' "$version_file"
+  if [[ -f "$init_file" ]]; then
+    parsed="$(awk -F'"' '/^__version__[[:space:]]*=[[:space:]]*"/ { print $2; exit }' "$init_file")"
+    if [[ -n "$parsed" ]]; then
+      echo "$parsed"
+      return 0
+    fi
+  fi
+
+  echo "0.0.2"
 }
 
 get_tjfusion_version() {

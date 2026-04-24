@@ -10,7 +10,7 @@ def _read_version_from_config() -> str:
     try:
         content = config_path.read_text(encoding="utf-8")
     except OSError:
-        return "0.0.0"
+        return "0.0.2"
 
     for raw_line in content.splitlines():
         line = raw_line.strip()
@@ -21,7 +21,7 @@ def _read_version_from_config() -> str:
             version = value.strip()
             if version:
                 return version
-    return "0.0.0"
+    return "0.0.2"
 
 
 __version__ = _read_version_from_config()
