@@ -159,6 +159,62 @@ class BridgeRuntimeTest(unittest.TestCase):
         self.assertEqual(config.result_siglip_topic, "/siglip2/result")
         self.assertEqual(config.result_tf_topic, "/tf")
 
+    def test_load_bridge_runtime_multi_zmq_pub_can_load_split_robotaction_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_root = root / "robotaction_data"
+            templates_dir = data_root / "templates"
+            graphs_dir = data_root / "graphs"
+            templates_dir.mkdir(parents=True, exist_ok=True)
+            graphs_dir.mkdir(parents=True, exist_ok=True)
+            (templates_dir / "test_box.yaml").write_text(
+                "\n".join(
+                    [
+                        "templates:",
+                        "  toy car:",
+                        "    pick:",
+                        "      - action_name: pick",
+                        "        pose_relative: [[0,0,0,0,0,0,1]]",
+                        "        gripper_state: [0]",
+                        "        time: [0]",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (graphs_dir / "graph_info.json").write_text(
+                (
+                    '{"nodes":[{"state_description":"x","next_action":[{"target":"toy car",'
+                    '"action_name":"pick"}]}]}'
+                ),
+                encoding="utf-8",
+            )
+
+            config_path = root / "bridge.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "bridge:",
+                        "  type: multi_zmq_pub_bridge",
+                        "  source_mode: zmq_source",
+                        "  zmq_source_addr: tcp://127.0.0.1:4444",
+                        "  sam3_server_addr: tcp://127.0.0.1:5554",
+                        "  flowpose_server_addr: tcp://127.0.0.1:5555",
+                        "  siglip2_server_addr: tcp://127.0.0.1:7777",
+                        "  result_pub_addr: tcp://0.0.0.0:8899",
+                        f"  robotaction_data_dir: {data_root}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            definition, config = load_bridge_runtime(config_path)
+
+        self.assertEqual(definition.kind, "multi_zmq_pub_bridge")
+        self.assertEqual(config.prompts, ["toy car"])
+        self.assertEqual(config.obj_id_map, {"toy car": 1})
+
     def test_profiled_bridge_definition_reuses_shared_runner_contract(self) -> None:
         bridge_definition = create_profiled_bridge_definition(
             BridgeProfile(

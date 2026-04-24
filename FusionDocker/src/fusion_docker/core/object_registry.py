@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+import json
 import yaml
 
 from fusion_docker.models import ActionRule, ObjectProfile, normalize_token
@@ -29,6 +30,87 @@ class ObjectRegistry:
             profiles[profile.object_type] = profile
         if not profiles:
             raise ValueError(f"No object YAML files found in {directory}")
+        return cls(profiles)
+
+    @classmethod
+    def from_robotaction_files(
+        cls,
+        *,
+        object_yaml_path: str | Path,
+        status_json_path: str | Path,
+    ) -> "ObjectRegistry":
+        object_path = Path(object_yaml_path)
+        status_path = Path(status_json_path)
+        if not object_path.exists():
+            raise FileNotFoundError(f"robotaction object YAML not found: {object_path}")
+        if not status_path.exists():
+            raise FileNotFoundError(f"robotaction status JSON not found: {status_path}")
+
+        with object_path.open("r", encoding="utf-8") as handle:
+            object_raw = yaml.safe_load(handle) or {}
+        if not isinstance(object_raw, dict):
+            raise ValueError(f"robotaction object YAML root must be a mapping: {object_path}")
+        templates_raw = object_raw.get("templates", {})
+        if not isinstance(templates_raw, dict):
+            raise ValueError("robotaction object YAML field 'templates' must be a mapping")
+
+        with status_path.open("r", encoding="utf-8") as handle:
+            status_raw = json.load(handle) or {}
+        if not isinstance(status_raw, dict):
+            raise ValueError(f"robotaction status JSON root must be an object: {status_path}")
+        nodes = status_raw.get("nodes", [])
+        if not isinstance(nodes, list):
+            raise ValueError("robotaction status JSON field 'nodes' must be a list")
+
+        rules_by_template: dict[str, list[ActionRule]] = {}
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            state_token = _normalize_robotaction_state(node.get("state_description"))
+            if not state_token:
+                continue
+            next_action = node.get("next_action")
+            if not isinstance(next_action, list):
+                continue
+            for item in next_action:
+                if not isinstance(item, dict):
+                    continue
+                template_key = normalize_token(item.get("target"))
+                action_name = normalize_token(item.get("action_name"))
+                if not template_key or not action_name:
+                    continue
+                rules_by_template.setdefault(template_key, []).append(
+                    ActionRule(
+                        current_state={state_token},
+                        goal=set(),
+                        requested_action=set(),
+                        action=action_name,
+                    )
+                )
+
+        profiles: dict[str, ObjectProfile] = {}
+        for raw_name, raw_actions in templates_raw.items():
+            template_key = normalize_token(raw_name)
+            if not template_key:
+                continue
+            affordances = set()
+            if isinstance(raw_actions, dict):
+                for action_name in raw_actions.keys():
+                    token = normalize_token(action_name)
+                    if token:
+                        affordances.add(token)
+            profiles[template_key] = ObjectProfile(
+                object_type=template_key,
+                display_name=str(raw_name),
+                template_key=template_key,
+                aliases={template_key},
+                affordances=affordances,
+                default_state="unknown",
+                state_aliases={},
+                action_rules=_dedup_rules(rules_by_template.get(template_key, [])),
+            )
+        if not profiles:
+            raise ValueError("No valid templates found in robotaction object YAML")
         return cls(profiles)
 
     def resolve(
@@ -176,3 +258,24 @@ def _token_set(values: Any) -> set[str]:
         }
     raise ValueError(f"Expected string or list, got {type(values).__name__}")
 
+
+def _normalize_robotaction_state(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    text = re.sub(r"^[a-z]\d+\s*:\s*", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[.。]+$", "", text).strip()
+    return normalize_token(text)
+
+
+def _dedup_rules(rules: list[ActionRule]) -> list[ActionRule]:
+    seen: set[tuple[tuple[str, ...], str]] = set()
+    output: list[ActionRule] = []
+    for rule in rules:
+        key = (tuple(sorted(rule.current_state)), rule.action)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(rule)
+    return output

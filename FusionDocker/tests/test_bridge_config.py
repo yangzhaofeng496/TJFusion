@@ -203,6 +203,96 @@ class BridgeConfigTest(unittest.TestCase):
         self.assertEqual(config.result_tf_topic, "/tf")
         self.assertEqual(config.prompts, ["toy car", "cup"])
 
+    def test_load_bridge_config_parses_robotaction_split_dir_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "bridge_robotaction.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "bridge:",
+                        "  source_mode: zmq_source",
+                        "  zmq_source_addr: tcp://127.0.0.1:4444",
+                        "  sam3_server_addr: tcp://127.0.0.1:5555",
+                        "  flowpose_server_addr: tcp://127.0.0.1:6666",
+                        "  siglip2_server_addr: tcp://127.0.0.1:7777",
+                        "  result_pub_addr: tcp://0.0.0.0:8899",
+                        "  robotaction_data_dir: configs/robotaction_data",
+                        "  robotaction_templates_dir: configs/robotaction_data/templates",
+                        "  robotaction_graphs_dir: configs/robotaction_data/graphs",
+                        "  robotaction_test_box_file: my_test_box.yaml",
+                        "  robotaction_graph_info_file: my_graph_info.json",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_bridge_config(config_path)
+
+        self.assertEqual(config.robotaction_data_dir, "configs/robotaction_data")
+        self.assertEqual(
+            config.robotaction_templates_dir,
+            "configs/robotaction_data/templates",
+        )
+        self.assertEqual(
+            config.robotaction_graphs_dir,
+            "configs/robotaction_data/graphs",
+        )
+        self.assertEqual(config.robotaction_test_box_file, "my_test_box.yaml")
+        self.assertEqual(config.robotaction_graph_info_file, "my_graph_info.json")
+
+    def test_load_bridge_config_parses_robotaction_named_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "bridge_robotaction_named.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "bridge:",
+                        "  source_mode: zmq_source",
+                        "  zmq_source_addr: tcp://127.0.0.1:4444",
+                        "  sam3_server_addr: tcp://127.0.0.1:5555",
+                        "  flowpose_server_addr: tcp://127.0.0.1:6666",
+                        "  siglip2_server_addr: tcp://127.0.0.1:7777",
+                        "  result_pub_addr: tcp://0.0.0.0:8899",
+                        "  robotaction:",
+                        "    graph_info: test_box",
+                        "    test_box: test_box",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_bridge_config(config_path)
+
+        self.assertTrue(config.robotaction_enabled)
+        self.assertEqual(config.robotaction_graph_info_file, "test_box.json")
+        self.assertEqual(config.robotaction_test_box_file, "test_box.yaml")
+
+    def test_load_bridge_config_parses_robotaction_base_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "bridge_robotaction_base_dir.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "bridge:",
+                        "  source_mode: zmq_source",
+                        "  zmq_source_addr: tcp://127.0.0.1:4444",
+                        "  sam3_server_addr: tcp://127.0.0.1:5555",
+                        "  flowpose_server_addr: tcp://127.0.0.1:6666",
+                        "  siglip2_server_addr: tcp://127.0.0.1:7777",
+                        "  result_pub_addr: tcp://0.0.0.0:8899",
+                        "  robotaction:",
+                        "    base_dir: configs/my_robotaction_data",
+                        "    graph_info: graph_info",
+                        "    test_box: test_box",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_bridge_config(config_path)
+
+        self.assertEqual(config.robotaction_data_dir, "configs/my_robotaction_data")
+
     def test_load_bridge_config_parses_schema_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

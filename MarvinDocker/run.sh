@@ -14,7 +14,6 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "$PWD/ros2_ws/src":/ros2_ws/src \
   -v "$PWD/scripts":/scripts \
-  -v "./robotaction:/robotaction" \
   -w /ros2_ws \
   --name marvin_dev \
   marvinfabric:latest \

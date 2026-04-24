@@ -49,11 +49,17 @@ from fusion_docker.port_inspector import (
 from fusion_docker.system_scaffold import create_system_scaffold
 from fusion_docker.zmq_listener import listen_zmq_messages
 
+HIDE_DEBUG_COMMANDS = True
+
 
 def _release_help(text: str) -> str:
     if supports_color():
         return f"{colorize('[RELEASE]', color='green', bold=True)} {text}"
     return f"[RELEASE] {text}"
+
+
+def _release_group_help(group: str, text: str) -> str:
+    return _release_help(f"[{group}] {text}")
 
 
 def _debug_help(text: str) -> str:
@@ -63,6 +69,19 @@ def _debug_help(text: str) -> str:
 
 
 def _release_debug_help_footer() -> str:
+    if HIDE_DEBUG_COMMANDS:
+        if supports_color():
+            return (
+                f"{colorize('Legend:', bold=True)} "
+                f"{colorize('[RELEASE]', color='green', bold=True)} stable command. "
+                "Groups: Runtime(start/restart/update), Config(docker-config/md/root), "
+                "ZMQ(listen-zmq/list-zmq-topics)."
+            )
+        return (
+            "Legend: [RELEASE] stable command. "
+            "Groups: Runtime(start/restart/update/in), Config(docker-config/md/root), "
+            "ZMQ(listen-zmq/list-zmq-topics)."
+        )
     if supports_color():
         return (
             f"{colorize('Legend:', bold=True)} "
@@ -70,6 +89,22 @@ def _release_debug_help_footer() -> str:
             f"{colorize('[DEBUG]', color='yellow', bold=True)} development/debug command."
         )
     return "Legend: [RELEASE] stable runtime command, [DEBUG] development/debug command."
+
+
+def _debug_command_help(text: str) -> str:
+    return _debug_help(text)
+
+
+def _hide_subcommands_in_help(subparsers_action, hidden_names: set[str]) -> None:
+    # Keep parser mappings intact so hidden commands remain runnable.
+    # Only prune help-visible choices.
+    if not hasattr(subparsers_action, "_choices_actions"):
+        return
+    subparsers_action._choices_actions = [
+        action
+        for action in subparsers_action._choices_actions
+        if getattr(action, "dest", "") not in hidden_names
+    ]
 
 
 def _default_docker_config_launch_path() -> str:
@@ -87,6 +122,10 @@ def _default_docker_config_launch_path() -> str:
 def _default_docker_model_root() -> str | None:
     docker_model_root = str(os.getenv("DOCKER_MODEL_ROOT", "")).strip()
     return docker_model_root or None
+
+
+def _default_project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
@@ -126,6 +165,10 @@ def main() -> None:
             _handle_start(args)
             return
 
+        if args.command == "in":
+            _handle_in(args)
+            return
+
         if args.command == "restart":
             _handle_restart(args)
             return
@@ -138,12 +181,20 @@ def main() -> None:
             _handle_docker_config(args)
             return
 
+        if args.command == "md":
+            _handle_model_download(args)
+            return
+
         if args.command == "root":
             _handle_root()
             return
 
         if args.command == "serve-ui":
             _handle_serve_ui(args)
+            return
+
+        if args.command == "serve-data-editor":
+            _handle_serve_data_editor(args)
             return
 
         if args.command == "list-dockers":
@@ -168,6 +219,9 @@ def main() -> None:
 
         if args.command == "listen-zmq":
             _handle_listen_zmq(args)
+            return
+        if args.command == "list-zmq-topics":
+            _handle_list_zmq_topics(args)
             return
 
         if args.command == "test-bridge":
@@ -213,11 +267,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar=(
+            "{start,restart,update,in,docker-config,md,root,listen-zmq,list-zmq-topics}"
+            if HIDE_DEBUG_COMMANDS
+            else None
+        ),
+    )
 
     start_parser = subparsers.add_parser(
         "start",
-        help=_release_help("Start selected dockers from docker_launch.yaml."),
+        help=_release_group_help("Runtime", "Start selected dockers. e.g. tjfusion start"),
     )
     start_parser.add_argument(
         "--launch-config",
@@ -252,6 +314,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When --tmux is enabled, replace an existing tmux session with the same docker name.",
     )
     start_parser.add_argument(
+        "--parallel",
+        type=int,
+        default=None,
+        help="Max concurrent docker launches. Defaults to matched docker count.",
+    )
+    start_parser.add_argument(
         "--monitor",
         action="store_true",
         help="When --tmux is enabled, show docker running/ended status and cleanup on Ctrl+C.",
@@ -270,8 +338,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     restart_parser = subparsers.add_parser(
         "restart",
-        help=_release_help(
-            "Force stop all local docker containers, clear busy configured ports, then relaunch selected dockers."
+        help=_release_group_help(
+            "Runtime",
+            "Cleanup then relaunch selected dockers. e.g. tjfusion restart"
         ),
     )
     restart_parser.add_argument(
@@ -311,6 +380,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When --tmux is enabled, replace an existing tmux session with the same docker name.",
     )
     restart_parser.add_argument(
+        "--parallel",
+        type=int,
+        default=None,
+        help="Max concurrent docker launches. Defaults to matched docker count.",
+    )
+    restart_parser.add_argument(
         "--monitor",
         action="store_true",
         help="When --tmux is enabled, show docker running/ended status and cleanup on Ctrl+C.",
@@ -342,9 +417,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show relaunch matches without executing run.sh. Cleanup steps still execute.",
     )
 
+    in_parser = subparsers.add_parser(
+        "in",
+        help=_release_group_help("Runtime", "Attach to a docker tmux session. e.g. tjfusion in MarvinDocker"),
+    )
+    in_parser.add_argument(
+        "docker_name",
+        help="Docker name, for example MarvinDocker.",
+    )
+    in_parser.add_argument(
+        "--launch-config",
+        help=(
+            "YAML file controlling docker targets. "
+            "When omitted, auto-uses $DOCKER_MODEL_ROOT/FusionDocker/configs/docker_launch.yaml if it exists."
+        ),
+    )
+    in_parser.add_argument(
+        "--docker-model-root",
+        default=_default_docker_model_root(),
+        help="DockerModel root path. Defaults to DOCKER_MODEL_ROOT when set.",
+    )
+
     update_parser = subparsers.add_parser(
         "update",
-        help=_release_help("Update local code via git pull and refresh the Python package."),
+        help=_release_group_help("Runtime", "Update code and Python package. e.g. tjfusion update"),
     )
     update_parser.add_argument(
         "--repo-root",
@@ -363,8 +459,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     docker_config_parser = subparsers.add_parser(
         "docker-config",
-        help=_release_help(
-            "Interactively choose dockers (Up/Down + Space) and write docker_launch.yaml."
+        help=_release_group_help(
+            "Config",
+            "Interactive docker selection. e.g. tjfusion docker-config"
         ),
     )
     docker_config_parser.add_argument(
@@ -382,19 +479,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="DockerModel root path. Defaults to DOCKER_MODEL_ROOT when set.",
     )
 
+    md_parser = subparsers.add_parser(
+        "md",
+        help=_release_group_help("Config", "Run model download script. e.g. tjfusion md Sam3Docker"),
+    )
+    md_parser.add_argument(
+        "docker_name",
+        help="Target docker folder name, for example Sam3Docker.",
+    )
+    md_parser.add_argument(
+        "--docker-model-root",
+        default=_default_docker_model_root(),
+        help="DockerModel root path. Defaults to DOCKER_MODEL_ROOT when set.",
+    )
+
     subparsers.add_parser(
         "root",
-        help=_release_help("Show the current DOCKER_MODEL_ROOT path."),
+        help=_release_group_help("Config", "Show DOCKER_MODEL_ROOT. e.g. tjfusion root"),
     )
 
     subparsers.add_parser(
         "serve-fusion",
-        help=_debug_help("Run the original FusionDocker event service."),
+        help=_debug_command_help("Run the original FusionDocker event service."),
     )
 
     bridge_parser = subparsers.add_parser(
         "serve-bridge",
-        help=_debug_help("Run the ZeroMQ RGB-D bridge service integrated from ZeroMQClient_interface.py."),
+        help=_debug_command_help("Run the ZeroMQ RGB-D bridge service integrated from ZeroMQClient_interface.py."),
     )
     bridge_parser.add_argument(
         "--config",
@@ -409,7 +520,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     launch_parser = subparsers.add_parser(
         "launch-dockers",
-        help=_debug_help("Scan DockerModel folders, match docker names by folder name, and execute run.sh."),
+        help=_debug_command_help("Scan DockerModel folders, match docker names by folder name, and execute run.sh."),
     )
     launch_parser.add_argument(
         "docker_names",
@@ -446,6 +557,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When --tmux is enabled, replace an existing tmux session with the same docker name.",
     )
     launch_parser.add_argument(
+        "--parallel",
+        type=int,
+        default=None,
+        help="Max concurrent docker launches. Defaults to matched docker count.",
+    )
+    launch_parser.add_argument(
         "--monitor",
         action="store_true",
         help="When --tmux is enabled, show docker running/ended status and cleanup on Ctrl+C.",
@@ -464,7 +581,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ui_parser = subparsers.add_parser(
         "serve-ui",
-        help=_debug_help("Serve a local web dashboard for docker status and clickable log viewing."),
+        help=_debug_command_help("Serve a local web dashboard for docker status and clickable log viewing."),
     )
     ui_parser.add_argument(
         "docker_names",
@@ -495,9 +612,55 @@ def _build_parser() -> argparse.ArgumentParser:
         help="How many recent log lines to show per docker request. Defaults to YAML or 300.",
     )
 
+    data_editor_parser = subparsers.add_parser(
+        "serve-data-editor",
+        help=_debug_command_help("Serve a dedicated web editor for robotaction data files."),
+    )
+    data_editor_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Data editor bind host. Default: 127.0.0.1",
+    )
+    data_editor_parser.add_argument(
+        "--port",
+        type=int,
+        default=8770,
+        help="Data editor bind port. Default: 8770",
+    )
+    data_editor_parser.add_argument(
+        "--data-dir",
+        default="configs/robotaction_data",
+        help=(
+            "Robotaction data root directory. "
+            "Expected split layout: templates/test_box.yaml and graphs/graph_info.json. "
+            "Default: configs/robotaction_data"
+        ),
+    )
+    data_editor_parser.add_argument(
+        "--templates-dir",
+        default=None,
+        help=(
+            "Optional templates directory override that stores test_box.yaml. "
+            "When unset, uses <data-dir>/templates."
+        ),
+    )
+    data_editor_parser.add_argument(
+        "--graphs-dir",
+        default=None,
+        help=(
+            "Optional graphs directory override that stores graph_info.json. "
+            "When unset, uses <data-dir>/graphs."
+        ),
+    )
+    data_editor_parser.add_argument(
+        "--seed-dir",
+        default="MarvinDocker/robotaction/data",
+        help="Initial source directory used when target files do not exist.",
+    )
+
     list_parser = subparsers.add_parser(
         "list-dockers",
-        help=_debug_help("List all folders under DockerModel root that contain run.sh."),
+        help=_debug_command_help("List all folders under DockerModel root that contain run.sh."),
     )
     list_parser.add_argument(
         "--docker-model-root",
@@ -507,12 +670,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser(
         "list-bridges",
-        help=_debug_help("List all registered bridge types and their descriptions."),
+        help=_debug_command_help("List all registered bridge types and their descriptions."),
     )
 
     inspect_io_parser = subparsers.add_parser(
         "inspect-docker-io",
-        help=_debug_help(
+        help=_debug_command_help(
             "Inspect RequestFormat input/output schema fields for one or more docker folders."
         ),
     )
@@ -538,7 +701,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     docker_ports_parser = subparsers.add_parser(
         "list-docker-ports",
-        help=_debug_help("Read Docker config files and list the ports each docker is configured to listen on."),
+        help=_debug_command_help("Read Docker config files and list the ports each docker is configured to listen on."),
     )
     docker_ports_parser.add_argument(
         "docker_names",
@@ -557,7 +720,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     inspect_ports_parser = subparsers.add_parser(
         "inspect-ports",
-        help=_debug_help("List listening service ports and optionally inspect one port for traffic."),
+        help=_debug_command_help("List listening service ports and optionally inspect one port for traffic."),
     )
     inspect_ports_parser.add_argument(
         "--port",
@@ -573,13 +736,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
     listen_zmq_parser = subparsers.add_parser(
         "listen-zmq",
-        help=_debug_help("Subscribe to a ZMQ PUB endpoint on a port and print received messages."),
+        help=_release_group_help("ZMQ", "Print ZMQ topics/messages. e.g. tjfusion listen-zmq --port 8899"),
+    )
+    listen_zmq_parser.add_argument(
+        "topic_positional",
+        nargs="?",
+        default=None,
+        help="Optional topic filter as positional argument, for example /action.",
     )
     listen_zmq_parser.add_argument(
         "--port",
         type=int,
-        required=True,
-        help="ZMQ port to subscribe to, for example 8899.",
+        default=8899,
+        help="ZMQ port to subscribe to. Defaults to 8899.",
     )
     listen_zmq_parser.add_argument(
         "--host",
@@ -601,10 +770,40 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Stop if no message arrives within this timeout.",
     )
+    list_topics_parser = subparsers.add_parser(
+        "list-zmq-topics",
+        help=_release_group_help(
+            "ZMQ",
+            "Query discovered ZMQ topics by sampling messages. e.g. tjfusion list-zmq-topics --port 8899",
+        ),
+    )
+    list_topics_parser.add_argument(
+        "--port",
+        type=int,
+        default=8899,
+        help="ZMQ port to subscribe to. Defaults to 8899.",
+    )
+    list_topics_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="ZMQ host to subscribe to. Defaults to 127.0.0.1.",
+    )
+    list_topics_parser.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Maximum messages to sample. Defaults to 200.",
+    )
+    list_topics_parser.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=2000,
+        help="Stop if no message arrives within this timeout. Defaults to 2000.",
+    )
 
     test_parser = subparsers.add_parser(
         "test-bridge",
-        help=_debug_help("Send a synthetic RGB-D request to the bridge service."),
+        help=_debug_command_help("Send a synthetic RGB-D request to the bridge service."),
     )
     test_parser.add_argument(
         "--endpoint",
@@ -617,7 +816,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     scaffold_parser = subparsers.add_parser(
         "create-system",
-        help=_debug_help("Create a new DockerModel system scaffold (Dockerfile/run.sh/build.sh/Server)."),
+        help=_debug_command_help("Create a new DockerModel system scaffold (Dockerfile/run.sh/build.sh/Server)."),
     )
     scaffold_parser.add_argument(
         "name",
@@ -651,7 +850,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     bridge_scaffold_parser = subparsers.add_parser(
         "create-bridge",
-        help=_debug_help("Create a new bridge module, config, and registry entry scaffold."),
+        help=_debug_command_help("Create a new bridge module, config, and registry entry scaffold."),
     )
     bridge_scaffold_parser.add_argument(
         "name",
@@ -670,7 +869,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     add_bridge_ui_parser = subparsers.add_parser(
         "add-bridge-to-ui",
-        help=_debug_help("Add or update a bridge entry in docker_launch.yaml for the UI dashboard."),
+        help=_debug_command_help("Add or update a bridge entry in docker_launch.yaml for the UI dashboard."),
     )
     add_bridge_ui_parser.add_argument(
         "name",
@@ -696,6 +895,27 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Update an existing bridge entry with the same name.",
     )
+
+    if HIDE_DEBUG_COMMANDS:
+        _hide_subcommands_in_help(
+            subparsers,
+            hidden_names={
+                "serve-fusion",
+                "serve-bridge",
+                "launch-dockers",
+                "serve-ui",
+                "serve-data-editor",
+                "list-dockers",
+                "list-bridges",
+                "inspect-docker-io",
+                "list-docker-ports",
+                "inspect-ports",
+                "test-bridge",
+                "create-system",
+                "create-bridge",
+                "add-bridge-to-ui",
+            },
+        )
 
     return parser
 
@@ -823,6 +1043,75 @@ def _handle_update(args: argparse.Namespace) -> None:
     print_success("Update completed.")
 
 
+def _handle_in(args: argparse.Namespace) -> None:
+    if not args.launch_config:
+        default_launch_config = Path(_default_docker_config_launch_path()).expanduser()
+        if default_launch_config.exists():
+            args.launch_config = str(default_launch_config)
+
+    launch_config = _load_optional_launch_config(args.launch_config)
+    docker_model_root_value = _resolve_docker_model_root_value(
+        args.docker_model_root,
+        launch_config.docker_model_root if launch_config else None,
+    )
+    docker_model_root = (
+        _require_docker_model_root(docker_model_root_value)
+        if docker_model_root_value
+        else None
+    )
+    group_lookup = _build_group_lookup(launch_config)
+    matches = _match_dockers_for_runtime(
+        [str(args.docker_name).strip()],
+        launch_config=launch_config,
+        docker_model_root=docker_model_root,
+        group_lookup=group_lookup,
+    )
+    if not matches:
+        raise FileNotFoundError(f"Cannot resolve docker '{args.docker_name}'.")
+    match = matches[0]
+    if match.target.is_remote:
+        raise ValueError("`tjfusion in` only supports local docker tmux sessions.")
+
+    tmux_path = shutil.which("tmux")
+    if not tmux_path:
+        raise FileNotFoundError("tmux is required but was not found in PATH.")
+    session_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", match.target.folder_name).strip("_.-") or "docker_session"
+
+    checked = subprocess.run(
+        [tmux_path, "has-session", "-t", session_name],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if checked.returncode != 0:
+        listed = subprocess.run(
+            [tmux_path, "ls"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        available = (listed.stdout or "").strip() or "(no active tmux sessions)"
+        raise RuntimeError(
+            f"tmux session '{session_name}' not found. Available sessions:\n{available}"
+        )
+    print_status("TMUX", f"Attaching to session '{session_name}' (press Esc to detach)", color="cyan")
+    subprocess.run(
+        [tmux_path, "bind-key", "-n", "Escape", "detach-client"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        subprocess.run([tmux_path, "attach-session", "-t", session_name], check=False)
+    finally:
+        subprocess.run(
+            [tmux_path, "unbind-key", "-n", "Escape"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+
 def _resolve_repo_root_for_update(raw_repo_root: str | None) -> Path:
     if raw_repo_root:
         repo_root = Path(raw_repo_root).expanduser().resolve()
@@ -835,11 +1124,17 @@ def _resolve_repo_root_for_update(raw_repo_root: str | None) -> Path:
     return repo_root
 
 
-def _run_subprocess(cmd: list[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
+def _run_subprocess(
+    cmd: list[str],
+    *,
+    capture_output: bool = False,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         cmd,
         text=True,
         capture_output=capture_output,
+        cwd=str(cwd) if cwd is not None else None,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
@@ -883,6 +1178,11 @@ def _run_docker_launch_flow(
     replace_session = args.replace_session or (
         launch_config.replace_session if launch_config else False
     )
+    launch_parallel: int | None = (
+        int(args.parallel)
+        if getattr(args, "parallel", None) is not None
+        else None
+    )
     poll_interval = (
         args.poll_interval
         if args.poll_interval is not None
@@ -900,7 +1200,6 @@ def _run_docker_launch_flow(
         raise ValueError("--monitor can only be used together with --tmux.")
     if poll_interval <= 0:
         raise ValueError("--poll-interval must be greater than 0.")
-
     if has_target_entries:
         available = [entry.name for entry in launch_config.docker_targets]
         print_status(
@@ -945,6 +1244,13 @@ def _run_docker_launch_flow(
     if not matches:
         print_warning("No docker tasks to launch. Remote failures were skipped.")
         return
+    if launch_parallel is None:
+        launch_parallel = max(1, len(matches))
+    if launch_parallel <= 0:
+        raise ValueError("--parallel must be greater than 0.")
+    if args.foreground and launch_parallel > 1:
+        print_warning("--parallel is ignored in foreground mode; falling back to 1.")
+        launch_parallel = 1
     for match in matches:
         print_status(
             "MATCH",
@@ -962,6 +1268,7 @@ def _run_docker_launch_flow(
         log_dir=args.log_dir,
         use_tmux=use_tmux,
         replace_session=replace_session,
+        max_parallel=launch_parallel,
     )
     failures = [result for result in results if not result.succeeded]
     remote_failures = [result for result in failures if result.match.target.is_remote]
@@ -1040,6 +1347,30 @@ def _handle_docker_config(args: argparse.Namespace) -> None:
         print_status("SELECT", ", ".join(selected), color="green")
     else:
         print_warning("No docker selected.")
+
+
+def _handle_model_download(args: argparse.Namespace) -> None:
+    docker_model_root = _require_docker_model_root(args.docker_model_root)
+    docker_name = str(args.docker_name or "").strip()
+    if not docker_name:
+        raise ValueError("docker_name is required, for example: tjfusion md Sam3Docker")
+
+    docker_dir = (docker_model_root / docker_name).resolve()
+    if not docker_dir.is_dir():
+        raise FileNotFoundError(f"Docker folder not found: {docker_dir}")
+
+    model_dir = docker_dir / "model"
+    script_path = model_dir / "download.sh"
+    if not script_path.is_file():
+        raise FileNotFoundError(
+            f"Missing model download script: {script_path}. 请联系开发者获取download.sh脚本"
+        )
+
+    print_status("MD", f"Docker: {docker_name}", color="cyan")
+    print_status("MD", f"Model directory: {model_dir}", color="cyan")
+    print_status("MD", f"Running: {script_path}", color="cyan")
+    _run_subprocess(["bash", "./download.sh"], capture_output=False, cwd=model_dir)
+    print_success(f"Model download script finished: {script_path}")
 
 
 def _handle_root() -> None:
@@ -1712,6 +2043,25 @@ def _pid_exists(pid: int) -> bool:
     return True
 
 
+def _extract_topic_from_rendered_payload(rendered: str) -> str:
+    text = str(rendered or "").strip()
+    if not text:
+        return ""
+    try:
+        payload = json.loads(text)
+    except Exception:
+        payload = None
+    if isinstance(payload, dict) and isinstance(payload.get("parts"), list):
+        parts = payload.get("parts") or []
+        if parts:
+            first = str(parts[0]).strip()
+            if first.startswith("/"):
+                return first.split()[0]
+    if text.startswith("/"):
+        return text.split()[0]
+    return ""
+
+
 def _handle_listen_zmq(args: argparse.Namespace) -> None:
     port = int(args.port)
     if port <= 0 or port > 65535:
@@ -1721,22 +2071,24 @@ def _handle_listen_zmq(args: argparse.Namespace) -> None:
     if args.timeout_ms is not None and int(args.timeout_ms) <= 0:
         raise ValueError("--timeout-ms must be greater than 0.")
 
+    topic_value = str(args.topic_positional or args.topic or "")
     endpoint = f"tcp://{args.host}:{port}"
-    print_status("ZMQ", f"Listening on {endpoint} topic='{args.topic}'", color="cyan")
+    print_status("ZMQ", f"Listening on {endpoint} topic='{topic_value}'", color="cyan")
     printed_count = 0
 
     def _print_message(item) -> None:
         nonlocal printed_count
         printed_count += 1
+        topic_name = _extract_topic_from_rendered_payload(item.rendered) or "<unknown>"
         print_status(
-            "ZMQ",
+            f"ZMQ({topic_name})",
             f"message={item.index} parts={item.part_count} payload={item.rendered}",
             color="green",
         )
 
     messages = listen_zmq_messages(
         endpoint=endpoint,
-        topic=str(args.topic),
+        topic=topic_value,
         limit=int(args.limit) if args.limit is not None else None,
         timeout_ms=int(args.timeout_ms) if args.timeout_ms is not None else None,
         on_message=_print_message,
@@ -1746,6 +2098,45 @@ def _handle_listen_zmq(args: argparse.Namespace) -> None:
         return
     if args.limit is not None or args.timeout_ms is not None:
         print_status("ZMQ", f"Received {printed_count} message(s).", color="cyan")
+
+
+def _handle_list_zmq_topics(args: argparse.Namespace) -> None:
+    port = int(args.port)
+    if port <= 0 or port > 65535:
+        raise ValueError("--port must be between 1 and 65535.")
+    if args.limit is not None and int(args.limit) <= 0:
+        raise ValueError("--limit must be greater than 0.")
+    if args.timeout_ms is not None and int(args.timeout_ms) <= 0:
+        raise ValueError("--timeout-ms must be greater than 0.")
+
+    endpoint = f"tcp://{args.host}:{port}"
+    print_status("ZMQ", f"Sampling topics on {endpoint}", color="cyan")
+
+    topic_counts: dict[str, int] = {}
+
+    def _collect_topic(item) -> None:
+        topic_name = _extract_topic_from_rendered_payload(item.rendered)
+        if not topic_name:
+            return
+        topic_counts[topic_name] = topic_counts.get(topic_name, 0) + 1
+
+    sampled = listen_zmq_messages(
+        endpoint=endpoint,
+        topic="",
+        limit=int(args.limit) if args.limit is not None else None,
+        timeout_ms=int(args.timeout_ms) if args.timeout_ms is not None else None,
+        on_message=_collect_topic,
+    )
+    if not sampled:
+        print_warning("No ZMQ messages received.")
+        return
+    if not topic_counts:
+        print_warning("No topic field detected from sampled messages.")
+        return
+
+    print_status("ZMQ", f"Discovered {len(topic_counts)} topic(s):", color="cyan")
+    for topic_name in sorted(topic_counts):
+        print_status("ZMQ", f"{topic_name} (messages={topic_counts[topic_name]})", color="green")
 
 
 def _resolve_first_existing(base_dir: Path, names: tuple[str, ...]) -> Path | None:
@@ -1900,7 +2291,7 @@ def _handle_serve_ui(args: argparse.Namespace) -> None:
         host=ui_host,
         port=ui_port,
         log_lines=ui_log_lines,
-        project_root=Path.cwd().resolve(),
+        project_root=_default_project_root(),
         launch_config_path=launch_config_path,
         docker_model_root_hint=docker_model_root,
         docker_model_root_override=(
@@ -1910,6 +2301,24 @@ def _handle_serve_ui(args: argparse.Namespace) -> None:
         ),
         docker_names_override=list(args.docker_names) if args.docker_names else None,
         bridge_entries=launch_config.bridge_entries if launch_config else None,
+    )
+
+
+def _handle_serve_data_editor(args: argparse.Namespace) -> None:
+    from fusion_docker.data_editor_server import serve_robotaction_data_editor
+
+    port = int(args.port)
+    if port <= 0 or port > 65535:
+        raise ValueError("--port must be between 1 and 65535.")
+
+    serve_robotaction_data_editor(
+        host=str(args.host or "127.0.0.1"),
+        port=port,
+        project_root=_default_project_root(),
+        data_dir=str(args.data_dir or "configs/robotaction_data"),
+        templates_dir=(str(args.templates_dir) if args.templates_dir else None),
+        graphs_dir=(str(args.graphs_dir) if args.graphs_dir else None),
+        seed_dir=str(args.seed_dir or "MarvinDocker/robotaction/data"),
     )
 
 

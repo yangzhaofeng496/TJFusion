@@ -24,3 +24,6 @@ where = ["src"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fusion_docker.__version__" }
+[tool.setuptools.package-data]
+"fusion_docker" = ["version.conf"]
+

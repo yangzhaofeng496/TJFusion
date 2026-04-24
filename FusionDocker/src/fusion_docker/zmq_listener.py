@@ -53,6 +53,9 @@ def listen_zmq_messages(
                 on_message(messages[-1])
             if limit is not None and len(messages) >= limit:
                 break
+    except KeyboardInterrupt:
+        # Allow Ctrl+C to stop listening without noisy traceback output.
+        pass
     finally:
         socket.close(0)
     return messages

@@ -30,6 +30,7 @@ import zmq
 
 from fusion_docker.config import load_bridge_config, load_docker_launch_config
 from fusion_docker.console import print_status, print_warning
+from fusion_docker.data_editor_server import ensure_robotaction_data_files
 from fusion_docker.docker_launcher import (
     DockerContainerInfo,
     DockerLaunchResult,
@@ -54,6 +55,11 @@ from fusion_docker.models import (
     DockerLaunchConfig,
     DockerTargetEntry,
 )
+from fusion_docker.robotaction_data import (
+    ROBOTACTION_GRAPH_FILE,
+    ROBOTACTION_TEST_BOX_FILE,
+    resolve_robotaction_data_paths,
+)
 
 GROUP_ORDER = ("vision", "inference", "action", "ungrouped")
 ANSI_CSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
@@ -72,6 +78,7 @@ DOCKER_SERVICE_DEFAULT_HOST = "192.168.1.61"
 DOCKER_CONFIG_CACHE_TTL_S = 8.0
 VIDEO_STREAM_RETENTION_SEC = 15.0
 VIDEO_STREAM_LIMIT = 128
+BRIDGE_LOG_MAX_LINES = 400
 ANSI_COLOR_TABLE = {
     30: "#1d2433",
     31: "#ff6f7d",
@@ -397,6 +404,7 @@ class DashboardController:
             maxlen=ZMQ_TEST_HISTORY_LIMIT_DEFAULT
         )
         self._video_streams: dict[str, dict[str, Any]] = {}
+        self._robotaction_paths = resolve_robotaction_data_paths(project_root=self._project_root)
         for result in self._results:
             self._index_match(result.match)
         for result in self._results:
@@ -405,6 +413,7 @@ class DashboardController:
         if bridge_manager is not None:
             managers.insert(0, bridge_manager)
         self._index_bridges(managers)
+        self._ensure_robotaction_files_locked()
 
     @property
     def results(self) -> list[DockerLaunchResult]:
@@ -598,6 +607,230 @@ class DashboardController:
                 ),
             }
 
+    def robotaction_files_payload(
+        self,
+        *,
+        template_file: str = "",
+        graph_file: str = "",
+    ) -> dict[str, object]:
+        with self._lock:
+            self._ensure_robotaction_files_locked()
+            templates = self._list_robotaction_files_locked(kind="template")
+            graphs = self._list_robotaction_files_locked(kind="graph")
+            selected_template = self._choose_robotaction_file_locked(
+                candidates=templates,
+                requested=template_file,
+                fallback=ROBOTACTION_TEST_BOX_FILE,
+            )
+            selected_graph = self._choose_robotaction_file_locked(
+                candidates=graphs,
+                requested=graph_file,
+                fallback=ROBOTACTION_GRAPH_FILE,
+            )
+            template_path = self._robotaction_file_path_locked(kind="template", file_name=selected_template)
+            graph_path = self._robotaction_file_path_locked(kind="graph", file_name=selected_graph)
+            if not template_path.exists():
+                template_path.write_text(self._default_test_box_yaml(), encoding="utf-8")
+            if not graph_path.exists():
+                graph_path.write_text(self._default_graph_info_json(), encoding="utf-8")
+            template_content = template_path.read_text(encoding="utf-8")
+            graph_content = graph_path.read_text(encoding="utf-8")
+            return {
+                "ok": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "templates_files": templates,
+                "graphs_files": graphs,
+                "selected_template_file": selected_template,
+                "selected_graph_file": selected_graph,
+                "template_content": template_content,
+                "graph_content": graph_content,
+                "paths": {
+                    "templates_dir": str(self._robotaction_paths.templates_dir),
+                    "graphs_dir": str(self._robotaction_paths.graphs_dir),
+                    "test_box_yaml": str(template_path),
+                    "graph_info_json": str(graph_path),
+                },
+            }
+
+    def save_robotaction_files(
+        self,
+        *,
+        template_file: str,
+        graph_file: str,
+        template_content: str,
+        graph_content: str,
+    ) -> dict[str, object]:
+        with self._lock:
+            self._ensure_robotaction_files_locked()
+            template_path = self._robotaction_file_path_locked(
+                kind="template",
+                file_name=template_file or ROBOTACTION_TEST_BOX_FILE,
+            )
+            graph_path = self._robotaction_file_path_locked(
+                kind="graph",
+                file_name=graph_file or ROBOTACTION_GRAPH_FILE,
+            )
+            self._validate_robotaction_template_content(template_content)
+            self._validate_robotaction_graph_content(graph_content)
+            template_path.write_text(template_content, encoding="utf-8")
+            graph_path.write_text(graph_content, encoding="utf-8")
+            return {
+                "ok": True,
+                "message": "Saved robotaction files.",
+                "template_file": template_path.name,
+                "graph_file": graph_path.name,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def validate_robotaction_template(self, content: str) -> dict[str, object]:
+        with self._lock:
+            self._validate_robotaction_template_content(content)
+            parsed = yaml.safe_load(content) or {}
+            templates_raw = parsed.get("templates", {}) if isinstance(parsed, dict) else {}
+            template_names = [str(name) for name in templates_raw.keys()] if isinstance(templates_raw, dict) else []
+            action_count = 0
+            for actions in templates_raw.values() if isinstance(templates_raw, dict) else []:
+                if isinstance(actions, dict):
+                    action_count += len(actions)
+            return {
+                "ok": True,
+                "template_count": len(template_names),
+                "action_count": action_count,
+                "template_names": template_names,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def format_robotaction_template(self, content: str) -> dict[str, object]:
+        with self._lock:
+            self._validate_robotaction_template_content(content)
+            parsed = yaml.safe_load(content) or {}
+            formatted = yaml.safe_dump(
+                parsed,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+            return {
+                "ok": True,
+                "formatted_content": formatted,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def format_robotaction_graph(self, content: str) -> dict[str, object]:
+        with self._lock:
+            self._validate_robotaction_graph_content(content)
+            parsed = json.loads(content)
+            formatted = json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
+            node_count = len(parsed.get("nodes", [])) if isinstance(parsed, dict) and isinstance(parsed.get("nodes"), list) else 0
+            return {
+                "ok": True,
+                "formatted_content": formatted,
+                "node_count": node_count,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def _ensure_robotaction_files_locked(self) -> None:
+        seed_dir = (self._project_root / "MarvinDocker" / "robotaction" / "data").resolve()
+        ensure_robotaction_data_files(
+            data_dir=self._robotaction_paths.data_root_dir,
+            templates_dir=self._robotaction_paths.templates_dir,
+            graphs_dir=self._robotaction_paths.graphs_dir,
+            seed_dirs=[seed_dir] if seed_dir.exists() else [],
+        )
+
+    def _list_robotaction_files_locked(self, *, kind: str) -> list[str]:
+        if kind == "template":
+            root = self._robotaction_paths.templates_dir
+            valid_suffixes = {".yaml", ".yml"}
+        elif kind == "graph":
+            root = self._robotaction_paths.graphs_dir
+            valid_suffixes = {".json"}
+        else:
+            raise ValueError(f"Unsupported robotaction file kind: {kind}")
+        return [
+            path.name
+            for path in sorted(root.glob("*"))
+            if path.is_file() and path.suffix.lower() in valid_suffixes
+        ]
+
+    def _choose_robotaction_file_locked(
+        self,
+        *,
+        candidates: list[str],
+        requested: str,
+        fallback: str,
+    ) -> str:
+        requested_name = Path(str(requested or "").strip()).name
+        if requested_name and requested_name in candidates:
+            return requested_name
+        if fallback in candidates:
+            return fallback
+        if candidates:
+            return candidates[0]
+        return fallback
+
+    def _robotaction_file_path_locked(self, *, kind: str, file_name: str) -> Path:
+        safe_name = Path(file_name).name
+        if kind == "template":
+            root = self._robotaction_paths.templates_dir
+            valid_suffixes = {".yaml", ".yml"}
+        elif kind == "graph":
+            root = self._robotaction_paths.graphs_dir
+            valid_suffixes = {".json"}
+        else:
+            raise ValueError(f"Unsupported robotaction file kind: {kind}")
+        if not safe_name:
+            raise ValueError(f"{kind} file name cannot be empty.")
+        if Path(safe_name).suffix.lower() not in valid_suffixes:
+            raise ValueError(f"{kind} file extension is invalid: {safe_name}")
+        resolved = (root / safe_name).resolve()
+        root_resolved = root.resolve()
+        if resolved != root_resolved and root_resolved not in resolved.parents:
+            raise ValueError(f"Invalid {kind} file path: {safe_name}")
+        return resolved
+
+    @staticmethod
+    def _validate_robotaction_template_content(content: str) -> None:
+        if not str(content).strip():
+            raise ValueError("Template YAML content cannot be empty.")
+        try:
+            parsed = yaml.safe_load(content)
+        except Exception as exc:
+            raise ValueError(f"Template YAML is invalid: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("Template YAML root must be a mapping.")
+        if not isinstance(parsed.get("templates"), dict):
+            raise ValueError("Template YAML must contain mapping field 'templates'.")
+
+    @staticmethod
+    def _validate_robotaction_graph_content(content: str) -> None:
+        if not str(content).strip():
+            raise ValueError("Graph JSON content cannot be empty.")
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Graph JSON is invalid: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("Graph JSON root must be an object.")
+        if not isinstance(parsed.get("nodes"), list):
+            raise ValueError("Graph JSON must contain list field 'nodes'.")
+
+    @staticmethod
+    def _default_test_box_yaml() -> str:
+        return (
+            "templates:\n"
+            "  demo object:\n"
+            "    hold:\n"
+            "      - action_name: hold\n"
+            "        pose_relative:\n"
+            "          - [0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]\n"
+            "        gripper_state: [0.0]\n"
+            "        time: [0.0]\n"
+        )
+
+    @staticmethod
+    def _default_graph_info_json() -> str:
+        return json.dumps({"nodes": []}, ensure_ascii=False, indent=2) + "\n"
+
     def video_streams_payload_locked(self) -> list[dict[str, object]]:
         self._prune_video_streams_locked()
         items = sorted(
@@ -775,7 +1008,13 @@ class DashboardController:
         *,
         lines: int | None = None,
     ) -> dict[str, object]:
-        tail_lines = lines if lines is not None else self._log_lines
+        requested_lines = lines if lines is not None else self._log_lines
+        tail_lines = _clamp_int(
+            requested_lines,
+            default=min(self._log_lines, BRIDGE_LOG_MAX_LINES),
+            minimum=1,
+            maximum=BRIDGE_LOG_MAX_LINES,
+        )
         with self._lock:
             bridge_name, bridge_manager = self._resolve_bridge_manager(name)
             bridge = self._bridge_payload_for_locked(bridge_name, bridge_manager)
@@ -3259,9 +3498,9 @@ class BridgeManager:
             str(self._config_path),
         ]
 
-        with self._log_path.open("a", encoding="utf-8") as log_file:
+        with self._log_path.open("w", encoding="utf-8") as log_file:
             log_file.write(
-                f"\n=== Starting bridge from {self._config_path} at {datetime.now().isoformat()} ===\n"
+                f"=== Starting bridge from {self._config_path} at {datetime.now().isoformat()} ===\n"
             )
             log_file.flush()
             process = subprocess.Popen(
@@ -3300,7 +3539,6 @@ class BridgeManager:
                     "message": "Bridge is running externally and is not managed by this dashboard.",
                     "bridge": payload,
                 }
-            self._clear_visible_logs()
             self._last_message = "Bridge is already stopped."
             return {
                 "ok": True,
@@ -3316,7 +3554,6 @@ class BridgeManager:
             self._process.wait(timeout=5.0)
 
         exit_code = self._process.poll()
-        self._clear_visible_logs()
         self._last_message = f"Bridge stopped (exit code {exit_code})."
         self._process = None
         return {
@@ -3595,7 +3832,13 @@ class BridgeManager:
         self._process = None
 
     def read_logs(self, lines: int) -> str:
-        if lines <= 0 or not self._log_path.exists():
+        effective_lines = _clamp_int(
+            lines,
+            default=min(200, BRIDGE_LOG_MAX_LINES),
+            minimum=1,
+            maximum=BRIDGE_LOG_MAX_LINES,
+        )
+        if not self._log_path.exists():
             return ""
         try:
             file_size = self._log_path.stat().st_size
@@ -3603,7 +3846,7 @@ class BridgeManager:
             with self._log_path.open("r", encoding="utf-8", errors="replace") as handle:
                 if read_offset > 0:
                     handle.seek(read_offset)
-                tail = deque(handle, maxlen=lines)
+                tail = deque(handle, maxlen=effective_lines)
         except OSError:
             return ""
         return "".join(tail).strip()
@@ -4284,6 +4527,9 @@ def _build_handler(controller: DashboardController) -> type[BaseHTTPRequestHandl
                 if parsed.path == "/api/video-streams":
                     self._send_json(controller.video_streams_payload())
                     return
+                if parsed.path == "/api/robotaction/files":
+                    self._handle_robotaction_files(parsed.query)
+                    return
                 if parsed.path == "/favicon.ico":
                     self.send_response(HTTPStatus.NO_CONTENT)
                     self.end_headers()
@@ -4345,6 +4591,18 @@ def _build_handler(controller: DashboardController) -> type[BaseHTTPRequestHandl
                     return
                 if parsed.path == "/api/video-stream":
                     self._handle_video_stream_publish()
+                    return
+                if parsed.path == "/api/robotaction/files/save":
+                    self._handle_robotaction_files_save()
+                    return
+                if parsed.path == "/api/robotaction/template/validate":
+                    self._handle_robotaction_template_validate()
+                    return
+                if parsed.path == "/api/robotaction/template/format":
+                    self._handle_robotaction_template_format()
+                    return
+                if parsed.path == "/api/robotaction/graph/format":
+                    self._handle_robotaction_graph_format()
                     return
                 self._send_json(
                     {"error": f"Unknown path: {parsed.path}"},
@@ -4456,6 +4714,93 @@ def _build_handler(controller: DashboardController) -> type[BaseHTTPRequestHandl
                 return
 
             self._send_json(response, status=HTTPStatus.ACCEPTED)
+
+        def _handle_robotaction_files(self, query: str) -> None:
+            params = parse_qs(query)
+            template_file = params.get("template_file", [""])[0].strip()
+            graph_file = params.get("graph_file", [""])[0].strip()
+            try:
+                payload = controller.robotaction_files_payload(
+                    template_file=template_file,
+                    graph_file=graph_file,
+                )
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            self._send_json(payload)
+
+        def _handle_robotaction_files_save(self) -> None:
+            try:
+                payload = self._read_json_body()
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            template_file = str(payload.get("template_file", "")).strip()
+            graph_file = str(payload.get("graph_file", "")).strip()
+            template_content = str(payload.get("template_content", payload.get("test_box_yaml", "")))
+            graph_content = str(payload.get("graph_content", payload.get("graph_info_json", "")))
+
+            try:
+                response = controller.save_robotaction_files(
+                    template_file=template_file,
+                    graph_file=graph_file,
+                    template_content=template_content,
+                    graph_content=graph_content,
+                )
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            self._send_json(response)
+
+        def _handle_robotaction_template_validate(self) -> None:
+            try:
+                payload = self._read_json_body()
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            content = str(payload.get("content", ""))
+            try:
+                response = controller.validate_robotaction_template(content)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(response)
+
+        def _handle_robotaction_template_format(self) -> None:
+            try:
+                payload = self._read_json_body()
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            content = str(payload.get("content", ""))
+            try:
+                response = controller.format_robotaction_template(content)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(response)
+
+        def _handle_robotaction_graph_format(self) -> None:
+            try:
+                payload = self._read_json_body()
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            content = str(payload.get("content", ""))
+            try:
+                response = controller.format_robotaction_graph(content)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(response)
 
         def _handle_zmq_history(self, query: str) -> None:
             params = parse_qs(query)
@@ -5397,6 +5742,7 @@ def _build_dashboard_html() -> str:
 
             .view-switch {
               display: inline-flex;
+              flex-wrap: wrap;
               gap: 10px;
               align-items: center;
               margin-top: 18px;
@@ -5905,7 +6251,7 @@ def _build_dashboard_html() -> str:
               border: 1px solid rgba(103, 246, 255, 0.18);
               background:
                 linear-gradient(180deg, rgba(4, 11, 20, 0.98), rgba(3, 9, 16, 0.98));
-              color: #dffbff;
+              color: #cfe4f5;
               resize: vertical;
               font-family: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
               font-size: 0.92rem;
@@ -6209,7 +6555,7 @@ def _build_dashboard_html() -> str:
               border-radius: 12px;
               border: 1px solid rgba(103, 246, 255, 0.2);
               background: rgba(6, 16, 28, 0.96);
-              color: #dffbff;
+              color: #cfe4f5;
               resize: vertical;
               font-family: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
               font-size: 0.86rem;
@@ -6220,6 +6566,54 @@ def _build_dashboard_html() -> str:
             .json-textarea:focus {
               border-color: rgba(103, 246, 255, 0.38);
               box-shadow: 0 0 0 3px rgba(103, 246, 255, 0.1);
+            }
+
+            #robotaction-template-editor,
+            #robotaction-graph-editor {
+              min-height: 1040px;
+              max-height: none;
+              font-size: 0.95rem;
+              line-height: 1.68;
+              color: #b9d5ea;
+            }
+
+            .robotaction-file-controls {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              min-width: 420px;
+            }
+
+            .robotaction-file-filter {
+              flex: 1 1 auto;
+              min-width: 130px;
+              padding: 7px 10px;
+              border-radius: 10px;
+              border: 1px solid rgba(103, 246, 255, 0.18);
+              background: rgba(4, 12, 21, 0.95);
+              color: #c6deef;
+              font-size: 0.82rem;
+              outline: none;
+            }
+
+            .robotaction-file-select {
+              flex: 1 1 auto;
+              min-width: 220px;
+              max-width: 440px;
+              padding: 7px 10px;
+              border-radius: 10px;
+              border: 1px solid rgba(103, 246, 255, 0.2);
+              background: rgba(6, 16, 28, 0.96);
+              color: #cfe4f5;
+              font-size: 0.82rem;
+              outline: none;
+            }
+
+            .robotaction-file-count {
+              min-width: 52px;
+              text-align: center;
+              font-size: 0.78rem;
+              color: var(--muted);
             }
 
             .json-output {
@@ -6500,6 +6894,7 @@ def _build_dashboard_html() -> str:
               <button class="view-tab" id="tab-bridge" data-window="bridge" type="button">Bridge Window</button>
               <button class="view-tab" id="tab-zmq" data-window="zmq" type="button">ZMQ Window</button>
               <button class="view-tab" id="tab-video" data-window="video" type="button">Video Window</button>
+              <button class="view-tab" id="tab-robotaction" data-window="robotaction" type="button">Robotaction Window</button>
             </div>
 
             <div class="action-banner global-banner" id="action-banner"></div>
@@ -6859,6 +7254,77 @@ def _build_dashboard_html() -> str:
                 </div>
               </div>
             </section>
+
+            <section class="window-view hidden" id="robotaction-window">
+              <div class="panel">
+                <div class="panel-head viewer-head">
+                  <div class="viewer-title">
+                    <div class="viewer-title-line">
+                      <h3>Robotaction Data Editor</h3>
+                      <span class="status-chip status-unknown">editable</span>
+                    </div>
+                    <p>Edit template YAML and graph JSON directly from the dashboard.</p>
+                  </div>
+                  <div class="viewer-actions">
+                    <button class="control" id="robotaction-reload" type="button">Reload</button>
+                    <button class="control" id="robotaction-validate-yaml" type="button">Validate YAML</button>
+                    <button class="control" id="robotaction-format-yaml" type="button">Format YAML</button>
+                    <button class="control" id="robotaction-format-json" type="button">Format JSON</button>
+                    <button class="control" id="robotaction-save" type="button">Save</button>
+                  </div>
+                </div>
+                <div class="detail-strip bridge-detail-strip">
+                  <div class="detail-tile">
+                    <strong>Templates Dir</strong>
+                    <span class="truncate-text" id="robotaction-templates-dir" title="-">-</span>
+                  </div>
+                  <div class="detail-tile">
+                    <strong>Graphs Dir</strong>
+                    <span class="truncate-text" id="robotaction-graphs-dir" title="-">-</span>
+                  </div>
+                  <div class="detail-tile">
+                    <strong>Status</strong>
+                    <span class="truncate-text" id="robotaction-status" title="-">Loading...</span>
+                  </div>
+                </div>
+                <div class="zmq-schema-panels">
+                  <div class="zmq-schema-panel">
+                    <div class="zmq-schema-panel-head">
+                      <strong>Template YAML</strong>
+                      <div class="robotaction-file-controls">
+                        <input
+                          class="robotaction-file-filter"
+                          id="robotaction-template-filter"
+                          type="text"
+                          placeholder="Filter templates..."
+                        />
+                        <select class="robotaction-file-select" id="robotaction-template-file"></select>
+                        <span class="robotaction-file-count" id="robotaction-template-count">0/0</span>
+                      </div>
+                    </div>
+                    <div class="card-meta truncate-text" id="robotaction-template-path">-</div>
+                    <textarea class="config-textarea" id="robotaction-template-editor" spellcheck="false" placeholder="templates/*.yaml"></textarea>
+                  </div>
+                  <div class="zmq-schema-panel">
+                    <div class="zmq-schema-panel-head">
+                      <strong>Graph JSON</strong>
+                      <div class="robotaction-file-controls">
+                        <input
+                          class="robotaction-file-filter"
+                          id="robotaction-graph-filter"
+                          type="text"
+                          placeholder="Filter graphs..."
+                        />
+                        <select class="robotaction-file-select" id="robotaction-graph-file"></select>
+                        <span class="robotaction-file-count" id="robotaction-graph-count">0/0</span>
+                      </div>
+                    </div>
+                    <div class="card-meta truncate-text" id="robotaction-graph-path">-</div>
+                    <textarea class="config-textarea" id="robotaction-graph-editor" spellcheck="false" placeholder="graphs/*.json"></textarea>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
 
           <script>
@@ -6880,6 +7346,9 @@ def _build_dashboard_html() -> str:
             let bridgeLogsRefreshInFlight = false;
             let zmqHistoryRefreshInFlight = false;
             let videoRefreshInFlight = false;
+            let robotactionRefreshInFlight = false;
+            let robotactionTemplateFiles = [];
+            let robotactionGraphFiles = [];
 
             function escapeHtml(value) {
               return String(value)
@@ -7879,6 +8348,8 @@ def _build_dashboard_html() -> str:
                 activeWindow = "zmq";
               } else if (windowName === "video") {
                 activeWindow = "video";
+              } else if (windowName === "robotaction") {
+                activeWindow = "robotaction";
               } else {
                 activeWindow = "docker";
               }
@@ -7886,11 +8357,13 @@ def _build_dashboard_html() -> str:
               const isDocker = activeWindow === "docker";
               const isZmq = activeWindow === "zmq";
               const isVideo = activeWindow === "video";
+              const isRobotaction = activeWindow === "robotaction";
 
               document.getElementById("docker-window").classList.toggle("hidden", !isDocker);
               document.getElementById("bridge-window").classList.toggle("hidden", !isBridge);
               document.getElementById("zmq-window").classList.toggle("hidden", !isZmq);
               document.getElementById("video-window").classList.toggle("hidden", !isVideo);
+              document.getElementById("robotaction-window").classList.toggle("hidden", !isRobotaction);
 
               for (const tabButton of document.querySelectorAll(".view-tab")) {
                 const selected = tabButton.dataset.window === activeWindow;
@@ -7906,6 +8379,8 @@ def _build_dashboard_html() -> str:
                 refreshZmqHistory();
               } else if (isVideo) {
                 refreshVideoStreams();
+              } else if (isRobotaction) {
+                refreshRobotactionFiles();
               } else {
                 refreshLauncherConfig(false);
                 if (selectedDocker) {
@@ -8082,6 +8557,173 @@ def _build_dashboard_html() -> str:
                 document.getElementById("video-stream-status").textContent = error.message;
               } finally {
                 videoRefreshInFlight = false;
+              }
+            }
+
+            function renderRobotactionFiles(payload) {
+              const templates = Array.isArray(payload.templates_files) ? payload.templates_files : [];
+              const graphs = Array.isArray(payload.graphs_files) ? payload.graphs_files : [];
+              const selectedTemplate = payload.selected_template_file || "";
+              const selectedGraph = payload.selected_graph_file || "";
+              robotactionTemplateFiles = templates;
+              robotactionGraphFiles = graphs;
+
+              renderRobotactionFileSelect("template", selectedTemplate);
+              renderRobotactionFileSelect("graph", selectedGraph);
+
+              document.getElementById("robotaction-template-editor").value = payload.template_content || "";
+              document.getElementById("robotaction-graph-editor").value = payload.graph_content || "";
+              applyTruncateText(
+                "robotaction-template-path",
+                payload.paths?.test_box_yaml || "-",
+                "-",
+              );
+              applyTruncateText(
+                "robotaction-graph-path",
+                payload.paths?.graph_info_json || "-",
+                "-",
+              );
+              applyTruncateText(
+                "robotaction-templates-dir",
+                payload.paths?.templates_dir || "-",
+                "-",
+              );
+              applyTruncateText(
+                "robotaction-graphs-dir",
+                payload.paths?.graphs_dir || "-",
+                "-",
+              );
+              document.getElementById("robotaction-status").textContent =
+                `Loaded ${templates.length} template file(s), ${graphs.length} graph file(s).`;
+            }
+
+            function renderRobotactionFileSelect(kind, preferredFile = "") {
+              const isTemplate = kind === "template";
+              const allFiles = isTemplate ? robotactionTemplateFiles : robotactionGraphFiles;
+              const filterInput = document.getElementById(
+                isTemplate ? "robotaction-template-filter" : "robotaction-graph-filter",
+              );
+              const selectNode = document.getElementById(
+                isTemplate ? "robotaction-template-file" : "robotaction-graph-file",
+              );
+              const countNode = document.getElementById(
+                isTemplate ? "robotaction-template-count" : "robotaction-graph-count",
+              );
+              const keyword = String(filterInput.value || "").trim().toLowerCase();
+              const filtered = keyword
+                ? allFiles.filter((name) => String(name).toLowerCase().includes(keyword))
+                : [...allFiles];
+              const currentValue = preferredFile || String(selectNode.value || "");
+
+              selectNode.innerHTML = "";
+              if (filtered.length === 0) {
+                const placeholder = document.createElement("option");
+                placeholder.value = "";
+                placeholder.textContent = allFiles.length > 0 ? "No matched file" : "No file";
+                placeholder.selected = true;
+                placeholder.disabled = true;
+                selectNode.appendChild(placeholder);
+                selectNode.disabled = true;
+              } else {
+                for (const fileName of filtered) {
+                  const option = document.createElement("option");
+                  option.value = fileName;
+                  option.textContent = fileName;
+                  if (fileName === currentValue) {
+                    option.selected = true;
+                  }
+                  selectNode.appendChild(option);
+                }
+                if (selectNode.selectedIndex < 0) {
+                  selectNode.selectedIndex = 0;
+                }
+                selectNode.disabled = false;
+              }
+
+              countNode.textContent = `${filtered.length}/${allFiles.length}`;
+            }
+
+            async function refreshRobotactionFiles() {
+              if (robotactionRefreshInFlight) {
+                return;
+              }
+              robotactionRefreshInFlight = true;
+              try {
+                const templateSelect = document.getElementById("robotaction-template-file");
+                const graphSelect = document.getElementById("robotaction-graph-file");
+                const templateFile = encodeURIComponent(templateSelect.value || "");
+                const graphFile = encodeURIComponent(graphSelect.value || "");
+                const payload = await fetchJson(`/api/robotaction/files?template_file=${templateFile}&graph_file=${graphFile}`);
+                renderRobotactionFiles(payload);
+              } catch (error) {
+                document.getElementById("robotaction-status").textContent = error.message;
+              } finally {
+                robotactionRefreshInFlight = false;
+              }
+            }
+
+            async function saveRobotactionFiles() {
+              const templateSelect = document.getElementById("robotaction-template-file");
+              const graphSelect = document.getElementById("robotaction-graph-file");
+              const templateEditor = document.getElementById("robotaction-template-editor");
+              const graphEditor = document.getElementById("robotaction-graph-editor");
+              try {
+                const response = await postJson("/api/robotaction/files/save", {
+                  template_file: templateSelect.value || "",
+                  graph_file: graphSelect.value || "",
+                  template_content: templateEditor.value,
+                  graph_content: graphEditor.value,
+                });
+                document.getElementById("robotaction-status").textContent =
+                  response.message || "Saved robotaction files.";
+                await refreshRobotactionFiles();
+              } catch (error) {
+                document.getElementById("robotaction-status").textContent = error.message;
+                showActionBanner(error.message, true);
+              }
+            }
+
+            async function validateRobotactionYaml() {
+              const templateEditor = document.getElementById("robotaction-template-editor");
+              try {
+                const response = await postJson("/api/robotaction/template/validate", {
+                  content: templateEditor.value,
+                });
+                const names = Array.isArray(response.template_names) ? response.template_names.slice(0, 6).join(", ") : "";
+                document.getElementById("robotaction-status").textContent =
+                  `YAML OK | templates=${response.template_count || 0}, actions=${response.action_count || 0}${names ? " | " + names : ""}`;
+              } catch (error) {
+                document.getElementById("robotaction-status").textContent = error.message;
+                showActionBanner(error.message, true);
+              }
+            }
+
+            async function formatRobotactionYaml() {
+              const templateEditor = document.getElementById("robotaction-template-editor");
+              try {
+                const response = await postJson("/api/robotaction/template/format", {
+                  content: templateEditor.value,
+                });
+                templateEditor.value = response.formatted_content || templateEditor.value;
+                document.getElementById("robotaction-status").textContent = "Template YAML formatted.";
+              } catch (error) {
+                document.getElementById("robotaction-status").textContent = error.message;
+                showActionBanner(error.message, true);
+              }
+            }
+
+            async function formatRobotactionJson() {
+              const graphEditor = document.getElementById("robotaction-graph-editor");
+              try {
+                const response = await postJson("/api/robotaction/graph/format", {
+                  content: graphEditor.value,
+                });
+                graphEditor.value = response.formatted_content || graphEditor.value;
+                document.getElementById("robotaction-status").textContent =
+                  `Graph JSON formatted | nodes=${response.node_count || 0}`;
+              } catch (error) {
+                document.getElementById("robotaction-status").textContent = error.message;
+                showActionBanner(error.message, true);
               }
             }
 
@@ -8516,6 +9158,19 @@ def _build_dashboard_html() -> str:
             document.getElementById("zmq-test-send").addEventListener("click", () => sendZmqTest());
             document.getElementById("zmq-test-refresh").addEventListener("click", () => refreshZmqHistory());
             document.getElementById("video-refresh").addEventListener("click", () => refreshVideoStreams());
+            document.getElementById("robotaction-reload").addEventListener("click", () => refreshRobotactionFiles());
+            document.getElementById("robotaction-validate-yaml").addEventListener("click", () => validateRobotactionYaml());
+            document.getElementById("robotaction-format-yaml").addEventListener("click", () => formatRobotactionYaml());
+            document.getElementById("robotaction-format-json").addEventListener("click", () => formatRobotactionJson());
+            document.getElementById("robotaction-save").addEventListener("click", () => saveRobotactionFiles());
+            document.getElementById("robotaction-template-file").addEventListener("change", () => refreshRobotactionFiles());
+            document.getElementById("robotaction-graph-file").addEventListener("change", () => refreshRobotactionFiles());
+            document.getElementById("robotaction-template-filter").addEventListener("input", () => {
+              renderRobotactionFileSelect("template");
+            });
+            document.getElementById("robotaction-graph-filter").addEventListener("input", () => {
+              renderRobotactionFileSelect("graph");
+            });
             document.getElementById("zmq-test-docker").addEventListener("change", () => {
               const selectedName = document.getElementById("zmq-test-docker").value.trim();
               if (!selectedName || !zmqSchema || !Array.isArray(zmqSchema.dockers)) {
@@ -8578,6 +9233,7 @@ def _build_dashboard_html() -> str:
               await refreshLauncherConfig(true);
               await refreshZmqSchema(true);
               await refreshVideoStreams();
+              await refreshRobotactionFiles();
               switchWindow(activeWindow);
               setInterval(refreshStatus, 4500);
               setInterval(() => {
@@ -8597,6 +9253,11 @@ def _build_dashboard_html() -> str:
                   refreshVideoStreams();
                 }
               }, 800);
+              setInterval(() => {
+                if (activeWindow === "robotaction") {
+                  refreshRobotactionFiles();
+                }
+              }, 5000);
             });
           </script>
         </body>

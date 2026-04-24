@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path, PurePosixPath
@@ -455,13 +456,64 @@ def launch_matched_dockers(
     log_dir: str | Path | None = None,
     use_tmux: bool = False,
     replace_session: bool = False,
+    max_parallel: int = 1,
 ) -> list[DockerLaunchResult]:
     results: list[DockerLaunchResult] = []
+    effective_parallel = max(1, int(max_parallel))
     resolved_log_dir = (
         _resolve_log_dir(log_dir)
         if detached and not dry_run and not use_tmux
         else None
     )
+
+    can_parallelize = (
+        effective_parallel > 1
+        and len(matches) > 1
+        and not dry_run
+        and detached
+    )
+    if can_parallelize:
+        print_status(
+            "START",
+            f"Parallel launch enabled: workers={effective_parallel}, tasks={len(matches)}",
+            color="cyan",
+        )
+        ordered_results: list[DockerLaunchResult | None] = [None] * len(matches)
+        with ThreadPoolExecutor(max_workers=effective_parallel) as executor:
+            future_map = {
+                executor.submit(
+                    launch_single_match,
+                    match,
+                    use_tmux=use_tmux,
+                    replace_session=replace_session,
+                    detached=detached,
+                    log_dir=resolved_log_dir,
+                    max_parallel=1,
+                ): idx
+                for idx, match in enumerate(matches)
+            }
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                match = matches[idx]
+                try:
+                    ordered_results[idx] = future.result()
+                except Exception as exc:
+                    print_status(
+                        "ERROR",
+                        (
+                            f"Docker '{match.target.folder_name}' failed to launch "
+                            f"(parallel worker error: {exc})"
+                        ),
+                        color="red",
+                    )
+                    ordered_results[idx] = DockerLaunchResult(
+                        match=match,
+                        return_code=1,
+                        detached=detached and not use_tmux,
+                        tmux_session=_session_name_for_target(match.target) if use_tmux else None,
+                        startup_output=str(exc),
+                    )
+        return [item for item in ordered_results if item is not None]
 
     for match in matches:
         print_status(
@@ -673,6 +725,7 @@ def launch_single_match(
     replace_session: bool = True,
     detached: bool = True,
     log_dir: str | Path | None = None,
+    max_parallel: int = 1,
 ) -> DockerLaunchResult:
     return launch_matched_dockers(
         [match],
@@ -680,6 +733,7 @@ def launch_single_match(
         log_dir=log_dir,
         use_tmux=use_tmux,
         replace_session=replace_session,
+        max_parallel=max_parallel,
     )[0]
 
 
@@ -1413,6 +1467,9 @@ def _extract_docker_run_images(run_script_path: Path) -> list[str]:
         try:
             tokens = shlex.split(logical_line, comments=True, posix=True)
         except ValueError:
+            image = _extract_image_from_line_rough(logical_line, env_vars)
+            if image:
+                images.append(image)
             continue
         if not tokens:
             continue
@@ -1441,6 +1498,73 @@ def _extract_docker_run_images(run_script_path: Path) -> list[str]:
                 images.append(image)
 
     return sorted(set(images))
+
+
+def _extract_image_from_line_rough(
+    logical_line: str,
+    env_vars: dict[str, str],
+) -> str | None:
+    line = logical_line.strip()
+    if not line:
+        return None
+    match = re.search(r"(?:^|\s)(?:docker|.*/docker)\s+run\s+(.+)$", line)
+    if not match:
+        return None
+    raw_tail = match.group(1).replace("\\", " ")
+    rough_tokens = [token for token in raw_tail.split() if token]
+    if not rough_tokens:
+        return None
+    return _extract_image_token_from_docker_run_rough(rough_tokens, env_vars)
+
+
+def _extract_image_token_from_docker_run_rough(
+    tokens: list[str],
+    env_vars: dict[str, str],
+) -> str | None:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            index += 1
+            break
+        if token.startswith("--"):
+            if "=" in token:
+                index += 1
+                continue
+            if token in DOCKER_RUN_OPTION_WITH_VALUE:
+                index += 2
+            else:
+                index += 1
+            continue
+        if token.startswith("-"):
+            option_prefix = token[:2]
+            if option_prefix in {"-a", "-c", "-e", "-h", "-l", "-m", "-p", "-u", "-v", "-w"}:
+                if len(token) > 2:
+                    index += 1
+                else:
+                    index += 2
+            elif token in DOCKER_RUN_OPTION_WITH_VALUE:
+                index += 2
+            else:
+                index += 1
+            continue
+        break
+
+    if index >= len(tokens):
+        return None
+
+    raw_token = tokens[index].strip().strip("'\"")
+    resolved = _resolve_shell_token(raw_token, env_vars)
+    if resolved is None:
+        return None
+    image = resolved.strip().strip("'\"")
+    if not image:
+        return None
+    if any(char in image for char in ("$", "`")):
+        return None
+    if "${" in image or "$(" in image:
+        return None
+    return image
 
 
 def _to_logical_shell_lines(script_text: str) -> list[str]:

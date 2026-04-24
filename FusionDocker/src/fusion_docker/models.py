@@ -101,6 +101,21 @@ class BridgeServiceConfig:
     result_siglip_topic: str = "/siglip2/result"
     result_tf_topic: str = "/tf"
     result_siglip_vote_window: int = 1
+    robotaction_enabled: bool = False
+    robotaction_data_dir: str = ""
+    robotaction_templates_dir: str = ""
+    robotaction_graphs_dir: str = ""
+    robotaction_test_box_file: str = "test_box.yaml"
+    robotaction_graph_info_file: str = "graph_info.json"
+    robotaction_auto_run: bool = False
+    robotaction_status_topic: str = "/siglip2/result"
+    robotaction_progress_topic: str = "/control/task_percentage"
+    robotaction_object_tf_topic: str = "/tf"
+    robotaction_action_topic: str = "/action"
+    robotaction_base_frame: str = "base_link"
+    robotaction_camera_frames: list[str] = field(
+        default_factory=lambda: ["camera_rgb_link", "camera_link_rgb"]
+    )
 
     @property
     def downstream_server_addr(self) -> str:
@@ -153,6 +168,7 @@ class DockerLaunchConfig:
     use_tmux: bool = True
     monitor: bool = True
     replace_session: bool = False
+    parallel: int = 1
     poll_interval: float = 0.5
     dashboard_mode: str = "terminal"
     ui_host: str = "127.0.0.1"

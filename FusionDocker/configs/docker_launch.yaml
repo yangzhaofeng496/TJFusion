@@ -1,5 +1,6 @@
 docker_launcher:
   docker_model_root: ${DOCKER_MODEL_ROOT}
+  parallel: 4
   tmux: true
   monitor: true
   replace_session: true
@@ -49,5 +50,6 @@ docker_launcher:
   selected_dockers:
   - Fast-FoundationSteroDocker
   - FlowPoseDocker
+  - MarvinDocker
   - Sam3Docker
   - SiglipDocker

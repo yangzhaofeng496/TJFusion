@@ -21,6 +21,35 @@ pip install -r requirements.txt
 PYTHONPATH=src python3 -m fusion_docker --help
 ```
 
+## 兼容 robotaction 的 data 文件
+
+FusionDocker 现在提供独立目录：
+
+- `configs/robotaction_data/test_box.yaml`
+- `configs/robotaction_data/graph_info.json`
+
+可以启动独立 Web 编辑器（新端口）来编辑这两个文件：
+
+```bash
+PYTHONPATH=src python3 -m fusion_docker serve-data-editor \
+  --host 127.0.0.1 \
+  --port 8770 \
+  --data-dir configs/robotaction_data
+```
+
+如果你希望 `serve-fusion` 直接读取这两个文件，启动前设置：
+
+```bash
+export FUSION_ROBOTACTION_OBJECT_YAML=/home/yang/Downloads/TJFusion/FusionDocker/configs/robotaction_data/test_box.yaml
+export FUSION_ROBOTACTION_STATUS_JSON=/home/yang/Downloads/TJFusion/FusionDocker/configs/robotaction_data/graph_info.json
+PYTHONPATH=src python3 -m fusion_docker
+```
+
+说明：
+
+- `test_box.yaml` 会按动作模板读取（支持 robotaction 的 block-list 格式）。
+- `graph_info.json` 会转换为对象动作规则（按 `state_description + target + action_name`）。
+
 ## 1. 一键启动所有 Docker
 
 推荐直接使用 launch config：

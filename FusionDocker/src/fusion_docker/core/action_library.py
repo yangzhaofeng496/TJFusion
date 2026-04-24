@@ -57,34 +57,43 @@ def _parse_action_template(
     action_name: str,
     raw_spec: Any,
 ) -> ActionTemplate:
-    if not isinstance(raw_spec, dict):
-        raise ValueError(f"Action template must be a mapping: {template_name}.{action_name}")
-
-    normalized_action = normalize_token(raw_spec.get("action_name") or action_name)
+    blocks = _coerce_action_blocks(
+        raw_spec,
+        label=f"{template_name}.{action_name}",
+    )
+    normalized_action = normalize_token(blocks[0].get("action_name") or action_name)
     rotation_constraint = _coerce_triplet(
-        raw_spec.get("rotation_constraint", [100.0, 100.0, 100.0]),
+        blocks[0].get("rotation_constraint", [100.0, 100.0, 100.0]),
         label=f"{template_name}.{normalized_action}.rotation_constraint",
     )
-    pose_relative = _coerce_pose_list(
-        raw_spec.get("pose_relative", []),
-        label=f"{template_name}.{normalized_action}.pose_relative",
-    )
-    gripper_state = _coerce_float_list(
-        raw_spec.get("gripper_state", []),
-        label=f"{template_name}.{normalized_action}.gripper_state",
-    )
-    time = _coerce_float_list(
-        raw_spec.get("time", []),
-        label=f"{template_name}.{normalized_action}.time",
-    )
+    pose_relative: list = []
+    gripper_state: list[float] = []
+    time: list[float] = []
+    for block_index, block in enumerate(blocks):
+        block_label = f"{template_name}.{normalized_action}.block_{block_index}"
+        block_pose = _coerce_pose_list(
+            block.get("pose_relative", []),
+            label=f"{block_label}.pose_relative",
+        )
+        block_gripper = _coerce_float_list(
+            block.get("gripper_state", []),
+            label=f"{block_label}.gripper_state",
+        )
+        block_time = _coerce_float_list(
+            block.get("time", []),
+            label=f"{block_label}.time",
+        )
+        if len(block_pose) != len(block_gripper) or len(block_pose) != len(block_time):
+            raise ValueError(
+                "pose_relative, gripper_state, and time must have the same length "
+                f"for {block_label}"
+            )
+        pose_relative.extend(block_pose)
+        gripper_state.extend(block_gripper)
+        time.extend(block_time)
 
     if not pose_relative:
         raise ValueError(f"Action template has no pose_relative steps: {template_name}.{normalized_action}")
-    if len(pose_relative) != len(gripper_state) or len(pose_relative) != len(time):
-        raise ValueError(
-            "pose_relative, gripper_state, and time must have the same length "
-            f"for {template_name}.{normalized_action}"
-        )
 
     return ActionTemplate(
         template_name=template_name,
@@ -94,6 +103,17 @@ def _parse_action_template(
         gripper_state=gripper_state,
         time=time,
     )
+
+
+def _coerce_action_blocks(raw_spec: Any, *, label: str) -> list[dict[str, Any]]:
+    if isinstance(raw_spec, dict):
+        return [raw_spec]
+    if isinstance(raw_spec, list):
+        blocks = [item for item in raw_spec if isinstance(item, dict)]
+        if not blocks:
+            raise ValueError(f"Action template list has no valid blocks: {label}")
+        return blocks
+    raise ValueError(f"Action template must be mapping or list: {label}")
 
 
 def _coerce_triplet(values: Any, *, label: str) -> tuple[float, float, float]:
@@ -112,4 +132,3 @@ def _coerce_float_list(values: Any, *, label: str) -> list[float]:
     if not isinstance(values, list):
         raise ValueError(f"{label} must be a list")
     return [float(item) for item in values]
-

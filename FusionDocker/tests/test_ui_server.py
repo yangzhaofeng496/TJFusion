@@ -142,6 +142,45 @@ class DashboardControllerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             controller.publish_video_stream(title="", frame_base64="YWJj")
 
+    def test_robotaction_files_payload_exposes_split_editors(self) -> None:
+        controller = self._build_controller()
+
+        payload = controller.robotaction_files_payload()
+
+        self.assertTrue(payload["ok"])
+        self.assertIn("templates_files", payload)
+        self.assertIn("graphs_files", payload)
+        self.assertTrue(payload["selected_template_file"].endswith((".yaml", ".yml")))
+        self.assertTrue(payload["selected_graph_file"].endswith(".json"))
+        self.assertIn("templates_dir", payload["paths"])
+        self.assertIn("graphs_dir", payload["paths"])
+
+    def test_save_robotaction_files_updates_selected_files(self) -> None:
+        controller = self._build_controller()
+        controller.robotaction_files_payload()
+
+        response = controller.save_robotaction_files(
+            template_file="test_box.yaml",
+            graph_file="graph_info.json",
+            template_content=(
+                "templates:\n"
+                "  unit box:\n"
+                "    hold:\n"
+                "      - action_name: hold\n"
+                "        pose_relative: [[0,0,0,0,0,0,1]]\n"
+                "        gripper_state: [0]\n"
+                "        time: [0]\n"
+            ),
+            graph_content=json.dumps({"nodes": []}, ensure_ascii=False),
+        )
+
+        self.assertTrue(response["ok"])
+        updated = controller.robotaction_files_payload(
+            template_file="test_box.yaml",
+            graph_file="graph_info.json",
+        )
+        self.assertIn("unit box", updated["template_content"])
+
     @mock.patch("fusion_docker.ui_server.read_result_logs")
     def test_log_payload_keeps_startup_error_details_for_error_docker(
         self,

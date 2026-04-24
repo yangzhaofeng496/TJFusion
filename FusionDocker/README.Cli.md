@@ -54,6 +54,12 @@ tjfusion restart
 tjfusion update
 ```
 
+执行指定 docker 的模型下载脚本（`model/download.sh`）：
+
+```bash
+tjfusion md Sam3Docker
+```
+
 ## DEBUG 命令（开发调试）
 
 启动 Docker：

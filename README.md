@@ -72,3 +72,14 @@ tjfusion restart
 ```bash
 tjfusion update
 ```
+
+### `tjfusion md <DockerName>`
+
+用途：执行指定 docker 下 `model/download.sh`，自动下载模型文件。  
+场景：首次部署某个 docker 或模型文件缺失时快速补齐。  
+
+如果未找到 `download.sh`，会提示：`请联系开发者获取download.sh脚本`。
+
+```bash
+tjfusion md Sam3Docker
+```

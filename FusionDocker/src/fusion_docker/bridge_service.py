@@ -589,12 +589,17 @@ def _build_model_result(
     summary: str,
     payload: dict[str, Any] | None,
     elapsed_sec: float | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
+    status_text = str(status).strip().lower() if status is not None else ""
+    if not status_text:
+        status_text = "ok" if ok else "error"
     item: dict[str, Any] = {
         "name": name,
         "enabled": enabled,
         "ok": ok,
         "summary": summary,
+        "status": status_text,
     }
     if elapsed_sec is not None:
         item["elapsed_sec"] = round(float(elapsed_sec), 4)
@@ -604,11 +609,17 @@ def _build_model_result(
 
 
 def _print_model_result_line(request_id: str, model_key: str, result: dict[str, Any]) -> None:
-    status_text = "ok" if result.get("ok") else "error"
+    raw_status = str(result.get("status", "")).strip().lower()
+    status_text = raw_status if raw_status else ("ok" if result.get("ok") else "error")
     summary = str(result.get("summary", ""))
     elapsed = result.get("elapsed_sec")
     elapsed_text = f", elapsed={elapsed:.3f}s" if isinstance(elapsed, (int, float)) else ""
-    color = "green" if result.get("ok") else "yellow"
+    if status_text == "ok":
+        color = "green"
+    elif status_text in {"skipped", "disabled"}:
+        color = "blue"
+    else:
+        color = "yellow"
     print_status(
         "MODEL",
         f"{request_id} | {model_key}={status_text}{elapsed_text} | {summary}",
@@ -1379,15 +1390,27 @@ def process_once(
             sam3_summary = "unavailable: service/socket not ready."
             flowpose_summary = "unavailable: service/socket not ready."
         else:
-            flowpose_response["message"] = "sam3_flowpose pipeline is disabled in bridge config."
-            sam3_summary = "disabled by config."
-            flowpose_summary = "disabled by config."
+            if siglip2_server_addr:
+                flowpose_response["message"] = (
+                    "sam3_flowpose not scheduled in this pass (decoupled siglip-only worker)."
+                )
+                sam3_summary = "not scheduled in this pass (decoupled)."
+                flowpose_summary = "not scheduled in this pass (decoupled)."
+            else:
+                flowpose_response["message"] = "sam3_flowpose pipeline is disabled in bridge config."
+                sam3_summary = "disabled by config."
+                flowpose_summary = "disabled by config."
         model_results["sam3"] = _build_model_result(
             name="sam3",
             enabled=bool(run_sam3_flowpose),
             ok=False,
             summary=sam3_summary,
             payload=None,
+            status=(
+                "error"
+                if run_sam3_flowpose
+                else ("skipped" if siglip2_server_addr else "disabled")
+            ),
         )
         model_results["flowpose"] = _build_model_result(
             name="flowpose",
@@ -1395,6 +1418,11 @@ def process_once(
             ok=False,
             summary=flowpose_summary,
             payload=None,
+            status=(
+                "error"
+                if run_sam3_flowpose
+                else ("skipped" if siglip2_server_addr else "disabled")
+            ),
         )
 
     base64_payload = {"rgb_image": rgb_b64}

@@ -19,19 +19,12 @@ from fusion_docker.models import (
 )
 
 DEFAULT_APP_CONFIG = Path("/app/configs/app.yaml")
-DEFAULT_ACTION_LIBRARY = Path("/app/configs/action_library.yaml")
-DEFAULT_OBJECT_DIR = Path("/app/configs/objects")
 DEFAULT_BRIDGE_CONFIG = Path("/app/configs/bridge.sam3_flowpose.yaml")
 DEFAULT_DOCKER_LAUNCH_CONFIG = Path("/app/configs/docker_launch.yaml")
 
 
-def get_runtime_paths() -> tuple[Path, Path, Path]:
-    app_config = Path(os.getenv("FUSION_APP_CONFIG", str(DEFAULT_APP_CONFIG)))
-    action_library = Path(
-        os.getenv("FUSION_ACTION_LIBRARY", str(DEFAULT_ACTION_LIBRARY))
-    )
-    object_dir = Path(os.getenv("FUSION_OBJECT_DIR", str(DEFAULT_OBJECT_DIR)))
-    return app_config, action_library, object_dir
+def get_app_config_path() -> Path:
+    return Path(os.getenv("FUSION_APP_CONFIG", str(DEFAULT_APP_CONFIG)))
 
 
 def get_bridge_config_path() -> Path:
@@ -87,6 +80,10 @@ def load_bridge_config(path: str | Path) -> BridgeServiceConfig:
     flowpose_raw = _coerce_optional_mapping(raw.get("flowpose"), section_name="flowpose")
     siglip2_raw = _coerce_optional_mapping(raw.get("siglip2"), section_name="siglip2")
     publisher_raw = _coerce_optional_mapping(raw.get("publisher"), section_name="publisher")
+    robotaction_raw = _coerce_optional_mapping(
+        bridge_raw.get("robotaction"),
+        section_name="bridge.robotaction",
+    )
     bridge_type = str(bridge_raw.get("type", "")).strip().lower()
 
     prompts = bridge_raw.get("prompts", [])
@@ -198,6 +195,94 @@ def load_bridge_config(path: str | Path) -> BridgeServiceConfig:
     if source_mode == "zmq_source" and not zmq_source_addr:
         raise ValueError("bridge.zmq_source_addr is required when source_mode=zmq_source")
 
+    robotaction_enabled = bool(
+        "robotaction" in bridge_raw
+        or "robotaction_data_dir" in bridge_raw
+        or "robotaction_templates_dir" in bridge_raw
+        or "robotaction_graphs_dir" in bridge_raw
+        or "robotaction_test_box_file" in bridge_raw
+        or "robotaction_graph_info_file" in bridge_raw
+    )
+    robotaction_test_box_name = str(robotaction_raw.get("test_box", "")).strip()
+    robotaction_graph_info_name = str(robotaction_raw.get("graph_info", "")).strip()
+    robotaction_test_box_file = _normalize_robotaction_file_name(
+        primary_name=robotaction_test_box_name,
+        explicit_file=bridge_raw.get("robotaction_test_box_file"),
+        default_file="test_box.yaml",
+        default_suffix=".yaml",
+    )
+    robotaction_graph_info_file = _normalize_robotaction_file_name(
+        primary_name=robotaction_graph_info_name,
+        explicit_file=bridge_raw.get("robotaction_graph_info_file"),
+        default_file="graph_info.json",
+        default_suffix=".json",
+    )
+    robotaction_auto_run = bool(
+        robotaction_raw.get(
+            "auto_run",
+            bridge_raw.get("robotaction_auto_run", robotaction_enabled),
+        )
+    )
+    robotaction_status_topic = str(
+        robotaction_raw.get(
+            "status_topic",
+            bridge_raw.get("robotaction_status_topic", ""),
+        )
+    ).strip() or str(
+        publisher_raw.get(
+            "result_siglip_topic",
+            bridge_raw.get("result_siglip_topic", "/siglip2/result"),
+        )
+    ).strip()
+    robotaction_progress_topic = str(
+        robotaction_raw.get(
+            "progress_topic",
+            bridge_raw.get("robotaction_progress_topic", "/control/task_percentage"),
+        )
+    ).strip()
+    robotaction_object_tf_topic = str(
+        robotaction_raw.get(
+            "object_tf_topic",
+            bridge_raw.get("robotaction_object_tf_topic", ""),
+        )
+    ).strip() or str(
+        publisher_raw.get(
+            "result_tf_topic",
+            bridge_raw.get("result_tf_topic", "/tf"),
+        )
+    ).strip()
+    robotaction_action_topic = str(
+        robotaction_raw.get(
+            "action_topic",
+            bridge_raw.get("robotaction_action_topic", "/action"),
+        )
+    ).strip() or "/action"
+    robotaction_base_frame = str(
+        robotaction_raw.get(
+            "base_frame",
+            bridge_raw.get("robotaction_base_frame", "base_link"),
+        )
+    ).strip()
+    robotaction_camera_frames_raw = robotaction_raw.get(
+        "camera_frames",
+        bridge_raw.get("robotaction_camera_frames", ["camera_rgb_link", "camera_link_rgb"]),
+    )
+    if not isinstance(robotaction_camera_frames_raw, list):
+        raise ValueError("bridge.robotaction.camera_frames must be a list when provided.")
+    robotaction_camera_frames = [
+        str(item).strip()
+        for item in robotaction_camera_frames_raw
+        if str(item).strip()
+    ]
+
+    resolved_robotaction_data_dir = _resolve_bridge_path_like_value(
+        robotaction_raw.get(
+            "base_dir",
+            bridge_raw.get("robotaction_data_dir", ""),
+        ),
+        config_dir=config_path.parent,
+    )
+
     return BridgeServiceConfig(
         sam3_server_addr=sam3_server_addr,
         flowpose_server_addr=flowpose_server_addr,
@@ -250,7 +335,51 @@ def load_bridge_config(path: str | Path) -> BridgeServiceConfig:
                 )
             ),
         ),
+        robotaction_enabled=robotaction_enabled,
+        robotaction_data_dir=resolved_robotaction_data_dir,
+        robotaction_templates_dir=str(bridge_raw.get("robotaction_templates_dir", "")).strip(),
+        robotaction_graphs_dir=str(bridge_raw.get("robotaction_graphs_dir", "")).strip(),
+        robotaction_test_box_file=robotaction_test_box_file,
+        robotaction_graph_info_file=robotaction_graph_info_file,
+        robotaction_auto_run=robotaction_auto_run,
+        robotaction_status_topic=robotaction_status_topic,
+        robotaction_progress_topic=robotaction_progress_topic,
+        robotaction_object_tf_topic=robotaction_object_tf_topic,
+        robotaction_action_topic=robotaction_action_topic,
+        robotaction_base_frame=robotaction_base_frame,
+        robotaction_camera_frames=robotaction_camera_frames
+        or ["camera_rgb_link", "camera_link_rgb"],
     )
+
+
+def _normalize_robotaction_file_name(
+    *,
+    primary_name: str,
+    explicit_file: Any,
+    default_file: str,
+    default_suffix: str,
+) -> str:
+    for raw in (primary_name, str(explicit_file or "").strip()):
+        token = str(raw).strip()
+        if not token:
+            continue
+        path = Path(token)
+        if path.suffix:
+            return path.name
+        return f"{path.name}{default_suffix}"
+    return default_file
+
+
+def _resolve_bridge_path_like_value(raw_value: Any, *, config_dir: Path) -> str:
+    raw = str(raw_value or "").strip()
+    if not raw:
+        return ""
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return str(candidate)
+    # Resolve relative to the bridge config parent first, so runtime CWD does not change behavior.
+    resolved = (config_dir.parent / candidate).resolve()
+    return str(resolved)
 
 
 def _parse_bridge_input_mapping(raw_mapping: Any) -> BridgeInputMapping:
@@ -456,6 +585,9 @@ def load_docker_launch_config(path: str | Path) -> DockerLaunchConfig:
     )
     bridge_enabled = bridge_entries[0].enabled if bridge_entries else True
     bridge_config_path = bridge_entries[0].config_path if bridge_entries else None
+    parallel = int(launch_raw.get("parallel", launch_raw.get("parallel_workers", 1)))
+    if parallel <= 0:
+        raise ValueError("docker_launcher.parallel must be greater than 0")
 
     return DockerLaunchConfig(
         docker_model_root=docker_model_root,
@@ -471,6 +603,7 @@ def load_docker_launch_config(path: str | Path) -> DockerLaunchConfig:
         use_tmux=bool(launch_raw.get("tmux", True)),
         monitor=bool(launch_raw.get("monitor", True)),
         replace_session=bool(launch_raw.get("replace_session", False)),
+        parallel=parallel,
         poll_interval=float(launch_raw.get("poll_interval", 0.5)),
         dashboard_mode=dashboard_mode,
         ui_host=ui_host,
