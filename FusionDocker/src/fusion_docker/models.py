@@ -136,6 +136,7 @@ class BridgeServiceConfig:
 class BridgeLaunchEntry:
     name: str
     enabled: bool = True
+    auto_start: bool = False
     config_path: str | None = None
     schema_check: BridgeSchemaCheckConfig | None = None
 

@@ -1030,6 +1030,7 @@ def _coerce_bridge_entry(
         return BridgeLaunchEntry(
             name=f"Bridge {index}",
             enabled=True,
+            auto_start=False,
             config_path=config_path,
             schema_check=_clone_bridge_schema_check(default_schema_check),
         )
@@ -1049,6 +1050,7 @@ def _coerce_bridge_entry(
     return BridgeLaunchEntry(
         name=bridge_name,
         enabled=bool(raw_entry.get("enabled", True)),
+        auto_start=bool(raw_entry.get("auto_start", False)),
         config_path=config_path,
         schema_check=schema_check,
     )
@@ -1057,5 +1059,5 @@ def _coerce_bridge_entry(
 def _looks_like_single_bridge_mapping(raw_bridge: dict[str, Any]) -> bool:
     return any(
         key in raw_bridge
-        for key in ("enabled", "config", "config_path", "name")
+        for key in ("enabled", "auto_start", "config", "config_path", "name")
     )

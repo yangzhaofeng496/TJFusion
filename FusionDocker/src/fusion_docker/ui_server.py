@@ -413,6 +413,7 @@ class DashboardController:
         if bridge_manager is not None:
             managers.insert(0, bridge_manager)
         self._index_bridges(managers)
+        self._auto_start_enabled_bridges_locked()
         self._ensure_robotaction_files_locked()
 
     @property
@@ -2627,6 +2628,17 @@ class DashboardController:
             self._bridge_display_names[normalized] = str(display_name)
             self._bridge_order.append(normalized)
 
+    def _auto_start_enabled_bridges_locked(self) -> None:
+        for key in self._bridge_order:
+            manager = self._bridge_lookup[key]
+            if not bool(getattr(manager, "auto_start", False)):
+                continue
+            display_name = self._bridge_display_names[key]
+            try:
+                manager.start()
+            except Exception as exc:
+                print_warning(f"Bridge auto-start failed for '{display_name}': {exc}")
+
     def _bridge_payloads_locked(self) -> list[dict[str, object]]:
         if not self._bridge_order:
             return []
@@ -3129,12 +3141,14 @@ class DashboardController:
                     name=display_name,
                     project_root=self._project_root,
                     enabled=entry.enabled,
+                    auto_start=entry.auto_start,
                     config_path=entry.config_path,
                     schema_check=entry.schema_check,
                 )
             else:
                 manager.reconfigure(
                     enabled=entry.enabled,
+                    auto_start=entry.auto_start,
                     config_path=entry.config_path,
                     schema_check=entry.schema_check,
                 )
@@ -3149,6 +3163,7 @@ class DashboardController:
         self._bridge_lookup = new_lookup
         self._bridge_display_names = new_display_names
         self._bridge_order = new_order
+        self._auto_start_enabled_bridges_locked()
 
     @staticmethod
     def _default_bridge_payload() -> dict[str, object]:
@@ -3361,6 +3376,7 @@ class BridgeManager:
         project_root: Path,
         config_base_dir: Path | None = None,
         enabled: bool = True,
+        auto_start: bool = False,
         config_path: str | None = None,
         schema_check: BridgeSchemaCheckConfig | None = None,
     ) -> None:
@@ -3370,6 +3386,7 @@ class BridgeManager:
             config_base_dir.resolve() if config_base_dir is not None else self._project_root
         )
         self._enabled = enabled
+        self._auto_start = bool(auto_start)
         self._requested_config_path = config_path
         self._schema_check_override = self._clone_schema_check(schema_check)
         self._config_path = self._resolve_config_path(config_path)
@@ -3388,10 +3405,12 @@ class BridgeManager:
         self,
         *,
         enabled: bool,
+        auto_start: bool,
         config_path: str | None,
         schema_check: BridgeSchemaCheckConfig | None,
     ) -> None:
         self._enabled = enabled
+        self._auto_start = bool(auto_start)
         self._requested_config_path = config_path
         self._schema_check_override = self._clone_schema_check(schema_check)
         self._config_path = self._resolve_config_path(config_path)
@@ -3432,6 +3451,7 @@ class BridgeManager:
 
         return {
             "enabled": self._enabled,
+            "auto_start": self._auto_start,
             "status": status,
             "message": message,
             "config_path": str(self._config_path) if self._config_path is not None else "",
@@ -3441,6 +3461,10 @@ class BridgeManager:
             "managed": self._process is not None,
             "pid": self._process.pid if self._process is not None and self._process.poll() is None else None,
         }
+
+    @property
+    def auto_start(self) -> bool:
+        return bool(self._auto_start)
 
     def start(self) -> dict[str, object]:
         self._reload_config()
@@ -4455,6 +4479,7 @@ def serve_dashboard_ui(
                 project_root=resolved_project_root,
                 config_base_dir=bridge_config_base_dir,
                 enabled=entry.enabled,
+                auto_start=entry.auto_start,
                 config_path=entry.config_path,
                 schema_check=entry.schema_check,
             )

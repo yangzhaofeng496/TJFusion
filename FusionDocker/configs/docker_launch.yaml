@@ -13,12 +13,15 @@ docker_launcher:
   bridges:
   - name: Sam3 To FlowPose
     enabled: true
+    auto_start: false
     config: configs/bridge.sam3_flowpose.yaml
   - name: Siglip2_Bridge
     enabled: true
+    auto_start: false
     config: configs/bridge.siglip2.yaml
   - name: Multi-ZMQ-PUB-Bridge
     enabled: true
+    auto_start: true
     config: configs/bridge.multi_zmq_pub.yaml
   zmq_test:
     timeout_ms: 4000

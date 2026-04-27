@@ -30,9 +30,11 @@ class DockerLaunchConfigTest(unittest.TestCase):
                         "  bridges:",
                         "    - name: VisionBridge",
                         "      enabled: true",
+                        "      auto_start: true",
                         "      config: configs/bridge.sam3_flowpose.yaml",
                         "    - name: ActionBridge",
                         "      enabled: false",
+                        "      auto_start: false",
                         "      config: configs/bridge.action.yaml",
                         "  groups:",
                         "    vision:",
@@ -81,6 +83,33 @@ class DockerLaunchConfigTest(unittest.TestCase):
                 ("ActionBridge", False, "configs/bridge.action.yaml"),
             ],
         )
+        self.assertEqual([entry.auto_start for entry in config.bridge_entries], [True, False])
+
+    def test_bridge_entry_auto_start_can_target_specific_bridge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "docker_launch.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "docker_launcher:",
+                        "  bridges:",
+                        "    - name: A",
+                        "      enabled: true",
+                        "      auto_start: true",
+                        "      config: configs/bridge.a.yaml",
+                        "    - name: B",
+                        "      enabled: true",
+                        "      auto_start: false",
+                        "      config: configs/bridge.b.yaml",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_docker_launch_config(config_path)
+
+        self.assertEqual([entry.name for entry in config.bridge_entries], ["A", "B"])
+        self.assertEqual([entry.auto_start for entry in config.bridge_entries], [True, False])
 
     def test_load_docker_launch_config_rejects_invalid_dashboard_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

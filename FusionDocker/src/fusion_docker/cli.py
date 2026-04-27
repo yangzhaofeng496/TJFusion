@@ -1337,10 +1337,27 @@ def _handle_docker_config(args: argparse.Namespace) -> None:
     if selected is None:
         print_warning("Selection canceled. docker_launch.yaml not changed.")
         return
+    selected_auto_start_bridges: list[str] | None = None
+    if launch_config and launch_config.bridge_entries:
+        bridge_options = [entry.name for entry in launch_config.bridge_entries if str(entry.name).strip()]
+        default_bridge_selected = [
+            entry.name
+            for entry in launch_config.bridge_entries
+            if bool(entry.auto_start) and str(entry.name).strip()
+        ]
+        selected_auto_start_bridges = _interactive_select_dockers(
+            bridge_options,
+            default_bridge_selected,
+            title="Select bridges to auto-start (space to toggle)",
+        )
+        if selected_auto_start_bridges is None:
+            print_warning("Selection canceled. docker_launch.yaml not changed.")
+            return
     _write_selected_dockers(
         launch_config_path=launch_config_path,
         docker_model_root=docker_model_root,
         selected_dockers=selected,
+        selected_auto_start_bridges=selected_auto_start_bridges,
     )
     print_success(f"Saved {len(selected)} docker selection(s) into {launch_config_path}")
     if selected:
@@ -1401,6 +1418,7 @@ def _write_selected_dockers(
     launch_config_path: Path,
     docker_model_root: Path,
     selected_dockers: list[str],
+    selected_auto_start_bridges: list[str] | None = None,
 ) -> None:
     raw: dict[str, Any] = {}
     if launch_config_path.exists():
@@ -1424,6 +1442,10 @@ def _write_selected_dockers(
     if not launch_raw.get("docker_model_root"):
         launch_raw["docker_model_root"] = str(docker_model_root)
     launch_raw["selected_dockers"] = selected_dockers
+    _apply_bridge_auto_start_selection(
+        launch_raw=launch_raw,
+        selected_auto_start_bridges=selected_auto_start_bridges,
+    )
 
     launch_config_path.parent.mkdir(parents=True, exist_ok=True)
     with launch_config_path.open("w", encoding="utf-8") as handle:
@@ -1445,6 +1467,34 @@ def _coerce_docker_name_list(raw: Any) -> list[str]:
             if name and bool(item.get("enabled", True)):
                 docker_names.append(name)
     return docker_names
+
+
+def _normalize_bridge_name(value: str) -> str:
+    return normalize_docker_name(str(value or "").strip())
+
+
+def _apply_bridge_auto_start_selection(
+    *,
+    launch_raw: dict[str, Any],
+    selected_auto_start_bridges: list[str] | None,
+) -> None:
+    if selected_auto_start_bridges is None:
+        return
+    raw_bridges = launch_raw.get("bridges")
+    if not isinstance(raw_bridges, list):
+        raise ValueError(
+            "docker_launcher.bridges must be a list to set per-bridge auto_start."
+        )
+    selected_set = {
+        _normalize_bridge_name(name) for name in selected_auto_start_bridges if str(name).strip()
+    }
+    for entry in raw_bridges:
+        if not isinstance(entry, dict):
+            continue
+        normalized_name = _normalize_bridge_name(entry.get("name", ""))
+        if not normalized_name:
+            continue
+        entry["auto_start"] = normalized_name in selected_set
 
 
 def _interactive_select_dockers(

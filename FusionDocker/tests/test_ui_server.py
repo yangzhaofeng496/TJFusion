@@ -55,6 +55,24 @@ class DashboardControllerTest(unittest.TestCase):
             bridge_manager=bridge_manager,
         )
 
+    def test_bridge_auto_start_triggers_manager_start(self) -> None:
+        bridge_manager = mock.Mock()
+        bridge_manager.auto_start = True
+        bridge_manager.payload.return_value = {
+            "enabled": True,
+            "auto_start": True,
+            "status": "stopped",
+            "message": "Bridge is stopped.",
+            "config_path": "/tmp/bridge.local.yaml",
+            "log_path": "/tmp/bridge.log",
+            "endpoint": "tcp://127.0.0.1:5556",
+            "managed": False,
+            "pid": None,
+        }
+
+        self._build_controller(bridge_manager=bridge_manager)
+        bridge_manager.start.assert_called_once()
+
     @mock.patch("fusion_docker.ui_server.collect_runtime_statuses")
     def test_status_payload_includes_group_and_session_state(
         self,
