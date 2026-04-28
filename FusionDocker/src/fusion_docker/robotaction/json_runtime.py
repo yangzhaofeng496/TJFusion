@@ -11,6 +11,10 @@ import numpy as np
 import yaml
 
 
+CAMERA_IN_BASE_XYZ = np.array([0.0925, 0.0325, 1.2660], dtype=np.float64)
+CAMERA_IN_BASE_RPY = np.array([-2.3562, 0.0, -1.5708], dtype=np.float64)
+
+
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
@@ -107,6 +111,108 @@ def _quat_rotate_vector(q: np.ndarray, v: np.ndarray) -> np.ndarray:
     v_quat = np.array([v[0], v[1], v[2], 0.0], dtype=np.float64)
     rotated = _quat_multiply(_quat_multiply(q, v_quat), _quat_conjugate(q))
     return rotated[:3]
+
+
+def _rpy_to_quaternion(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    cr = np.cos(roll * 0.5)
+    sr = np.sin(roll * 0.5)
+    cp = np.cos(pitch * 0.5)
+    sp = np.sin(pitch * 0.5)
+    cy = np.cos(yaw * 0.5)
+    sy = np.sin(yaw * 0.5)
+    return np.array(
+        [
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+            cr * cp * cy + sr * sp * sy,
+        ],
+        dtype=np.float64,
+    )
+
+
+def _camera_pose_to_base_pose(
+    pos_in_camera: np.ndarray,
+    quat_in_camera: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    # URDF gives camera pose in base_link (parent=base_link, child=camera_rgb_link).
+    # Compose: T_base_target = T_base_camera * T_camera_target.
+    q_base_camera = _rpy_to_quaternion(*CAMERA_IN_BASE_RPY)
+    q_base_camera = q_base_camera / max(np.linalg.norm(q_base_camera), 1e-12)
+    p_base_target = _quat_rotate_vector(q_base_camera, pos_in_camera) + CAMERA_IN_BASE_XYZ
+    q_base_target = _quat_multiply(q_base_camera, quat_in_camera)
+    q_base_target = q_base_target / max(np.linalg.norm(q_base_target), 1e-12)
+    return p_base_target, q_base_target
+
+
+def _convert_action_poses_camera_to_base(action: dict[str, Any]) -> dict[str, Any]:
+    poses = action.get("poses")
+    if not isinstance(poses, list):
+        return action
+    camera_poses = []
+    base_poses = []
+    for pose in poses:
+        if not isinstance(pose, dict):
+            continue
+        pos_dict = pose.get("position", {})
+        ori_dict = pose.get("orientation", {})
+        pos = np.array(
+            [
+                float(pos_dict.get("x", 0.0)),
+                float(pos_dict.get("y", 0.0)),
+                float(pos_dict.get("z", 0.0)),
+            ],
+            dtype=np.float64,
+        )
+        quat = np.array(
+            [
+                float(ori_dict.get("x", 0.0)),
+                float(ori_dict.get("y", 0.0)),
+                float(ori_dict.get("z", 0.0)),
+                float(ori_dict.get("w", 1.0)),
+            ],
+            dtype=np.float64,
+        )
+        quat_norm = np.linalg.norm(quat)
+        if quat_norm <= 1e-8:
+            quat = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+        else:
+            quat = quat / quat_norm
+        camera_pose = {
+            "position": {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])},
+            "orientation": {
+                "x": float(quat[0]),
+                "y": float(quat[1]),
+                "z": float(quat[2]),
+                "w": float(quat[3]),
+            },
+        }
+        base_pos, base_quat = _camera_pose_to_base_pose(pos, quat)
+        base_pose = {
+            "position": {
+                "x": float(base_pos[0]),
+                "y": float(base_pos[1]),
+                "z": float(base_pos[2]),
+            },
+            "orientation": {
+                "x": float(base_quat[0]),
+                "y": float(base_quat[1]),
+                "z": float(base_quat[2]),
+                "w": float(base_quat[3]),
+            },
+        }
+        camera_poses.append(camera_pose)
+        base_poses.append(base_pose)
+
+    if base_poses:
+        action["poses"] = base_poses
+    if camera_poses:
+        action["poses_camera_rgb_link"] = camera_poses
+        action["camera_frame_id"] = "camera_rgb_link"
+    action["base_poses"] = base_poses
+    action["base_frame_id"] = "base_link"
+    action["frame_id"] = "base_link"
+    return action
 
 
 @dataclass(slots=True)
@@ -299,6 +405,7 @@ class RobotActionJsonRuntime:
             action = self._build_action_from_template(step, selected)
             if action is None:
                 return None
+            action = _convert_action_poses_camera_to_base(action)
 
         payload = {
             "state": self._active_state,

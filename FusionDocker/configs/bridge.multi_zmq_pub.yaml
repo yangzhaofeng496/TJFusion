@@ -17,10 +17,7 @@ bridge:
     progress_topic: /control/task_percentage
     object_tf_topic: /tf
   prompts:
-    - orange small object
     - toy car
-    - red box
-    - green small box
 sam3:
   server_addr: tcp://127.0.0.1:5562
   timeout_ms: 5000

@@ -225,6 +225,14 @@ def make_child_frame_id(item: dict, index: int, class_counts: dict):
     return f"obj_{index + 1}"
 
 
+def extract_tf_items_from_payload(payload: dict):
+    if isinstance(payload.get("tf"), list):
+        return payload["tf"]
+    if isinstance(payload.get("transforms"), list):
+        return payload["transforms"]
+    return None
+
+
 class BridgeRosPublisher:
     def __init__(self, node_name: str = "zmq2ros"):
         import rclpy
@@ -295,13 +303,23 @@ class BridgeRosPublisher:
             if not isinstance(item, dict):
                 continue
 
-            translation = item.get("translation", {})
-            rotation = item.get("rotation", {})
+            header = item.get("header", {}) if isinstance(item.get("header"), dict) else {}
+            transform_body = item.get("transform", {}) if isinstance(item.get("transform"), dict) else {}
+            translation = item.get("translation")
+            rotation = item.get("rotation")
+            if not isinstance(translation, dict):
+                translation = transform_body.get("translation", {})
+            if not isinstance(rotation, dict):
+                rotation = transform_body.get("rotation", {})
 
             transform = self.TransformStamped()
             transform.header.stamp = stamp
-            transform.header.frame_id = str(item.get("frame_id") or frame_id)
-            transform.child_frame_id = make_child_frame_id(item, index, class_counts)
+            transform.header.frame_id = str(
+                item.get("frame_id") or header.get("frame_id") or frame_id
+            )
+            transform.child_frame_id = str(
+                item.get("child_frame_id") or make_child_frame_id(item, index, class_counts)
+            )
 
             transform.transform.translation.x = float(translation.get("x", 0.0))
             transform.transform.translation.y = float(translation.get("y", 0.0))
@@ -449,16 +467,17 @@ def main():
                     ros_pub.node.get_logger().info(f"received zmq topic: {topic}")
 
                 frame_id = extract_frame_id(payload, args.default_frame_id)
-                tf_items = None
-                if isinstance(payload.get("tf"), list):
-                    tf_items = payload["tf"]
-                elif isinstance(payload.get("transforms"), list):
-                    tf_items = payload["transforms"]
+                tf_items = extract_tf_items_from_payload(payload)
 
                 ros_topic = topic or "/zmq"
+                force_tf_topic = ros_topic in ("/tf", "/tf_static")
 
                 if tf_items is not None:
                     ros_pub.publish_tf_items(ros_topic, tf_items, frame_id)
+                elif force_tf_topic:
+                    ros_pub.node.get_logger().warning(
+                        f"skip non-tf payload on {ros_topic}: expected 'tf' or 'transforms' list"
+                    )
                 elif isinstance(payload.get("yomni"), dict):
                     ros_pub.publish_yomni_tf(ros_topic, payload["yomni"], frame_id)
                 elif any(key in payload for key in ("objects", "pose", "obj_ids", "class_names")):

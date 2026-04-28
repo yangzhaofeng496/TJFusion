@@ -1,0 +1,10 @@
+templates:
+  demo object:
+    hold:
+      - action_name: hold
+        arm: right
+        rotation_constraint: [100, 100, 100]
+        pose_relative:
+          - [0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]
+        gripper_state: [0.0]
+        time: [0.0]
