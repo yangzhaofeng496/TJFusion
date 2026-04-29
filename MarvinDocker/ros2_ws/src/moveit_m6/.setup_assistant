@@ -1,0 +1,10 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: marvin_description
+    relative_path: urdf/marvin_CCS_m6.urdf.xacro
+  srdf:
+    relative_path: config/marvin_robot.srdf
+  package_settings:
+    author_name: yangzhaofeng
+    author_email: 2398603105@qq.com
+    generated_timestamp: 1777371831

@@ -28,9 +28,24 @@ def generate_launch_description():
         default_value='true',
         description='Whether to start RViz'
     ))
+    ld.add_action(DeclareLaunchArgument(
+        name='use_gui',
+        default_value='true',
+        description='Whether to start joint_state_publisher_gui'
+    ))
+    ld.add_action(DeclareLaunchArgument(
+        name='gripper_debug',
+        default_value='false',
+        description='Enable 6-DoF gripper mount debug joints'
+    ))
 
     # Generate the robot description from XACRO
-    robot_description_param = Command(['xacro ', LaunchConfiguration('model')])
+    robot_description_param = Command([
+        'xacro ',
+        LaunchConfiguration('model'),
+        ' gripper_debug:=',
+        LaunchConfiguration('gripper_debug')
+    ])
 
     # Pass robot_description as a string parameter
     ld.add_action(Node(
@@ -41,6 +56,14 @@ def generate_launch_description():
         parameters=[{
             'robot_description': ParameterValue(value=robot_description_param, value_type=str)
         }]
+    ))
+
+    ld.add_action(Node(
+        condition=IfCondition(LaunchConfiguration('use_gui')),
+        package='joint_state_publisher_gui',
+        executable='joint_state_publisher_gui',
+        name='joint_state_publisher_gui',
+        output='screen'
     ))
 
     # OPTIONAL: Launch RViz if you want

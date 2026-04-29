@@ -1,0 +1,160 @@
+<?xml version="1.0"?>
+<robot name="omnigripper.SLDASM" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="omnigripper_sldasm" params="prefix:='omnigripper_' parent:='flange_L' mount_xyz:='0 0 0' mount_rpy:='0 0 0' gripper_debug:='false'">
+    <link name="${prefix}base_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://marvin_description/meshes/ominigripper/base_link.STL" />
+        </geometry>
+        <material name="${prefix}base_link_mat">
+          <color rgba="0.79216078 0.81961176 0.92941569 1.00000000"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://marvin_description/meshes/ominigripper/base_link.STL" />
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="-0.000142 0.005641 0.0488811" rpy="0 0 0" />
+        <mass value="0.4064271" />
+        <inertia ixx="0.0002976" ixy="-0.0000024" ixz="0.0000011" iyy="0.0004831" iyz="-0.0000721" izz="0.0004721" />
+      </inertial>
+    </link>
+
+    <link name="${prefix}left_finger_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://marvin_description/meshes/ominigripper/Left_Finger_Link.STL" />
+        </geometry>
+        <material name="${prefix}left_finger_link_mat">
+          <color rgba="0.60392549 0.60392549 0.60392549 1.00000000"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://marvin_description/meshes/ominigripper/Left_Finger_Link.STL" />
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="-0.0166753 -0.0028108 0.0127051" rpy="0 0 0" />
+        <mass value="0.031395" />
+        <inertia ixx="0.0000116" ixy="-0.0000013" ixz="0" iyy="0.0000048" iyz="0" izz="0.0000102" />
+      </inertial>
+    </link>
+
+    <link name="${prefix}right_finger_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://marvin_description/meshes/ominigripper/Right_Finger_Link.STL" />
+        </geometry>
+        <material name="${prefix}right_finger_link_mat">
+          <color rgba="0.60392549 0.60392549 0.60392549 1.00000000"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://marvin_description/meshes/ominigripper/Right_Finger_Link.STL" />
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0.0089293 -0.0028108 0.0127051" rpy="0 0 0" />
+        <mass value="0.031395" />
+        <inertia ixx="0.0000116" ixy="-0.0000013" ixz="0" iyy="0.0000048" iyz="0" izz="0.0000102" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}left_finger_joint" type="prismatic">
+      <parent link="${prefix}base_link" />
+      <child link="${prefix}left_finger_link" />
+      <origin xyz="0.0516878 -0.0421084 0.0916374" rpy="0.7853982 0 -3.1283862" />
+      <axis xyz="1 0 0" />
+      <limit lower="0" upper="0" effort="0" velocity="0" />
+    </joint>
+
+    <joint name="${prefix}right_finger_joint" type="prismatic">
+      <parent link="${prefix}base_link" />
+      <child link="${prefix}right_finger_link" />
+      <origin xyz="-0.07508 -0.0261034 0.1093149" rpy="2.3561945 0 0.0132065" />
+      <axis xyz="1 0 0" />
+      <limit lower="0" upper="0" effort="0" velocity="0" />
+    </joint>
+
+    <xacro:if value="${gripper_debug}">
+      <link name="${prefix}mount_base_link" />
+      <link name="${prefix}mount_x_link" />
+      <link name="${prefix}mount_y_link" />
+      <link name="${prefix}mount_z_link" />
+      <link name="${prefix}mount_roll_link" />
+      <link name="${prefix}mount_pitch_link" />
+      <link name="${prefix}mount_yaw_link" />
+
+      <joint name="${prefix}mount_base_joint" type="fixed">
+        <origin xyz="${mount_xyz}" rpy="${mount_rpy}" />
+        <parent link="${parent}" />
+        <child link="${prefix}mount_base_link" />
+      </joint>
+      <joint name="${prefix}mount_x_joint" type="prismatic">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_base_link" />
+        <child link="${prefix}mount_x_link" />
+        <axis xyz="1 0 0" />
+        <limit lower="-0.1" upper="0.1" effort="10" velocity="0.2" />
+      </joint>
+      <joint name="${prefix}mount_y_joint" type="prismatic">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_x_link" />
+        <child link="${prefix}mount_y_link" />
+        <axis xyz="0 1 0" />
+        <limit lower="-0.1" upper="0.1" effort="10" velocity="0.2" />
+      </joint>
+      <joint name="${prefix}mount_z_joint" type="prismatic">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_y_link" />
+        <child link="${prefix}mount_z_link" />
+        <axis xyz="0 0 1" />
+        <limit lower="-0.1" upper="0.1" effort="10" velocity="0.2" />
+      </joint>
+      <joint name="${prefix}mount_roll_joint" type="revolute">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_z_link" />
+        <child link="${prefix}mount_roll_link" />
+        <axis xyz="1 0 0" />
+        <limit lower="-3.1416" upper="3.1416" effort="10" velocity="1.0" />
+      </joint>
+      <joint name="${prefix}mount_pitch_joint" type="revolute">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_roll_link" />
+        <child link="${prefix}mount_pitch_link" />
+        <axis xyz="0 1 0" />
+        <limit lower="-3.1416" upper="3.1416" effort="10" velocity="1.0" />
+      </joint>
+      <joint name="${prefix}mount_yaw_joint" type="revolute">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_pitch_link" />
+        <child link="${prefix}mount_yaw_link" />
+        <axis xyz="0 0 1" />
+        <limit lower="-3.1416" upper="3.1416" effort="10" velocity="1.0" />
+      </joint>
+      <joint name="${prefix}mount_joint" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="${prefix}mount_yaw_link" />
+        <child link="${prefix}base_link" />
+      </joint>
+    </xacro:if>
+
+    <xacro:unless value="${gripper_debug}">
+      <joint name="${prefix}mount_joint" type="fixed">
+        <origin xyz="${mount_xyz}" rpy="${mount_rpy}" />
+        <parent link="${parent}" />
+        <child link="${prefix}base_link" />
+      </joint>
+    </xacro:unless>
+  </xacro:macro>
+</robot>

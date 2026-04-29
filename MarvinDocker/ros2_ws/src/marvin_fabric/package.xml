@@ -12,6 +12,9 @@
   <depend>rclcpp</depend>
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>interactive_markers</depend>
   <depend>marvin_msgs</depend>
   <depend>marvin_ros_control</depend>
    <depend>marvin_description</depend>

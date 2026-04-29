@@ -27,8 +27,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     ros-humble-xacro \
     ros-humble-rviz2 \
+    ros-humble-interactive-markers \
+    ros-humble-joint-state-publisher-gui \
     ros-humble-rqt \
     ros-humble-rqt-common-plugins \
+    ros-humble-controller-manager \
+    ros-humble-moveit-ros-move-group \
+    ros-humble-moveit-kinematics \
+    ros-humble-moveit-planners \
+    ros-humble-moveit-simple-controller-manager \
+    ros-humble-moveit-configs-utils \
+    ros-humble-moveit-ros-visualization \
+    ros-humble-moveit-ros-warehouse \
+    ros-humble-moveit-setup-assistant \
     ros-dev-tools \
     ros-humble-pinocchio \
     ros-humble-urdf-launch \

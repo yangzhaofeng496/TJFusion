@@ -3,7 +3,8 @@
      Commit Version: 1.5.1-0-g916b5db  Build Version: 1.5.7152.31018
      For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
 <robot  xmlns:xacro="http://ros.org/wiki/xacro">
-  <xacro:macro  name="M6-S-R-CCS-696-V4">
+  <xacro:include filename="omnigripper.SLDASM.urdf.xacro" />
+  <xacro:macro  name="M6-S-R-CCS-696-V4" params="gripper_prefix:='right_gripper_' gripper_mount_xyz:='0 -0.00 0.145' gripper_mount_rpy:='-3.14 -1.57 0' gripper_debug:='false'">
   <link
     name="Base_R">
     <inertial>
@@ -456,5 +457,11 @@
     <parent link="Link7_R" />
     <child link="flange_R" />
   </joint>
+  <xacro:omnigripper_sldasm
+    prefix="${gripper_prefix}"
+    parent="flange_R"
+    mount_xyz="${gripper_mount_xyz}"
+    mount_rpy="${gripper_mount_rpy}"
+    gripper_debug="${gripper_debug}" />
   </xacro:macro>
 </robot>

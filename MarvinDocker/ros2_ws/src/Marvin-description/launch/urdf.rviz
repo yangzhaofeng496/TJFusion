@@ -164,10 +164,6 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        left_tool:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
         lift_link:
           Alpha: 1
           Show Axes: false
@@ -183,10 +179,6 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        right_tool:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
         tracking_base_link:
           Alpha: 1
           Show Axes: false

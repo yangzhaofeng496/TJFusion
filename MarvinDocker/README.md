@@ -2,39 +2,6 @@
 
 This package provides ROS 2 control functionalities for Marvin robots.
 
-## Installation
-
-1. **Clone the repository:**
-    ```bash
-    cd ~/ros2_ws/src
-    extract the package here
-    ```
-
-2. **Install dependencies:**
-    ```bash
-    cd ~/ros2_ws
-    rosdep install --from-paths src --ignore-src -r -y
-    ```
-
-3. **Build the workspace:**
-    for x64
-    ```bash
-    colcon build --packages-select marvin_fabric --cmake-args -DCPU_ARCH=x86
-    ```
-    for arm64
-    ```bash
-    colcon build --packages-select marvin_fabric --cmake-args -DCPU_ARCH=arm64
-    ```
-
-4. **Source the workspace:**
-    ```bash
-    source ~/ros2_ws/install/setup.bash
-    ```
-5. **Install the vcan auto start service:**
-    ```bash
-    cd ~/ros2_ws/src/marvin_fabric
-    sudo bash install_van.sh
-    ```
 # control topics
 1. left eef roation constraint
 msg type:
@@ -51,6 +18,79 @@ control/target_poseR
 ## Usage
 
 Refer to the package documentation and launch files for usage instructions.
+
+## MoveIt + Fabric Runtime Modes
+
+The launch file:
+```bash
+ros2 launch marvin_fabric fabric_moveit_bridge.launch.py ...
+```
+
+supports the following runtime switches:
+
+- `use_real_hardware`:
+  - `true`: start `marvin_ros_control` hardware node and wait for real `/info/joint_feedback` before starting MoveIt.
+  - `false`: use offline feedback node.
+- `enable_fabric_control`:
+  - `true`: start Fabric planner + MoveIt goal bridge (robot can be commanded through `/control/joint_cmd_A/B`).
+  - `false`: feedback visualization only (no Fabric command publisher from this launch).
+- `simulate_robot_motion` (only meaningful when `use_real_hardware:=false`):
+  - `true`: publish sinusoidal mock joint feedback/state data.
+  - `false`: publish static initial pose feedback/state data.
+
+### Common launch commands
+
+1. Offline, static feedback (visualization/debug):
+```bash
+ros2 launch marvin_fabric fabric_moveit_bridge.launch.py \
+  use_real_hardware:=false \
+  enable_fabric_control:=true \
+  simulate_robot_motion:=false
+```
+
+2. Offline, dynamic mock robot data:
+```bash
+ros2 launch marvin_fabric fabric_moveit_bridge.launch.py \
+  use_real_hardware:=false \
+  enable_fabric_control:=true \
+  simulate_robot_motion:=true
+```
+
+3. Real hardware, feedback-only (no control output from Fabric):
+```bash
+ros2 launch marvin_fabric fabric_moveit_bridge.launch.py \
+  use_real_hardware:=true \
+  enable_fabric_control:=false
+```
+
+4. Real hardware, Fabric control enabled:
+```bash
+ros2 launch marvin_fabric fabric_moveit_bridge.launch.py \
+  use_real_hardware:=true \
+  enable_fabric_control:=true
+```
+
+### Verify topic flow
+
+Check command path:
+```bash
+ros2 topic info /control/joint_cmd_A -v
+ros2 topic info /control/joint_cmd_B -v
+```
+
+Check feedback path:
+```bash
+ros2 topic echo /info/arm_state --once
+ros2 topic hz /info/joint_feedback
+ros2 topic hz /joint_states
+```
+
+Check MoveIt marker bridge inputs:
+```bash
+ros2 topic list | grep robot_interaction_interactive_marker_topic
+ros2 topic hz /control/target_poseL
+ros2 topic hz /control/target_poseR
+```
 
 ## License
 

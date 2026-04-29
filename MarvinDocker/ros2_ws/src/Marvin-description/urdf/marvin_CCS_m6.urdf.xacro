@@ -2,11 +2,34 @@
 <robot name="marvin_robot" xmlns:xacro="http://ros.org/wiki/xacro">
 
   <!-- Define mesh path as a Xacro property -->
-  <xacro:include filename="$(find marvin_description)/urdf/M6-S-L-CCS-696-V4.urdf.xacro" />
-  <xacro:include filename="$(find marvin_description)/urdf/M6-S-R-CCS-696-V4.urdf.xacro" />
-  <xacro:include filename="$(find marvin_description)/urdf/stand_v3.urf.xacro" />
-  <xacro:M6-S-L-CCS-696-V4 />
-  <xacro:M6-S-R-CCS-696-V4 />
+  <xacro:include filename="M6-S-L-CCS-696-V4.urdf.xacro" />
+  <xacro:include filename="M6-S-R-CCS-696-V4.urdf.xacro" />
+  <xacro:include filename="stand_v3.urf.xacro" />
+  <xacro:arg name="gripper_debug" default="false" />
+  <xacro:property name="left_gripper_mount_xyz" value="0 0 0" />
+  <xacro:property name="left_gripper_mount_rpy" value="0 0 0" />
+  <xacro:property name="right_gripper_mount_xyz" value="0 0 0" />
+  <xacro:property name="right_gripper_mount_rpy" value="0 0 0" />
+  <xacro:property name="left_tool_base_x" value="${-0.0116961}" />
+  <xacro:property name="left_tool_base_y" value="${-0.0901059}" />
+  <xacro:property name="left_tool_base_z" value="${0.15047615}" />
+  <xacro:property name="right_tool_base_x" value="${-0.0116961}" />
+  <xacro:property name="right_tool_base_y" value="${-0.0901059}" />
+  <xacro:property name="right_tool_base_z" value="${0.15047615}" />
+  <xacro:property name="tool_shift_x" value="${0.0}" />
+  <xacro:property name="tool_shift_y" value="${0.00}" />
+  <xacro:property name="tool_shift_z" value="${0.00}" />
+  <xacro:property name="gripper_debug" value="$(arg gripper_debug)" />
+  <xacro:M6-S-L-CCS-696-V4
+    gripper_prefix="left_gripper_"
+    gripper_mount_xyz="${left_gripper_mount_xyz}"
+    gripper_mount_rpy="${left_gripper_mount_rpy}"
+    gripper_debug="${gripper_debug}" />
+  <xacro:M6-S-R-CCS-696-V4
+    gripper_prefix="right_gripper_"
+    gripper_mount_xyz="${right_gripper_mount_xyz}"
+    gripper_mount_rpy="${right_gripper_mount_rpy}"
+    gripper_debug="${gripper_debug}" />
   <xacro:stand />
   <!-- base Link -->
   <joint name="base_to_left_arm" type="fixed">
@@ -20,18 +43,22 @@
     <child link="Base_R"/>
     <origin xyz="0 -0.026 1.121" rpy="1.57 0 0"/>
   </joint>
-  
   <link name="left_tool" />
   <joint name="left_tool_joint" type="fixed">
-    <parent link="flange_L"/>
+    <parent link="left_gripper_base_link"/>
     <child link="left_tool"/>
-    <origin rpy="3.14 -1.57 0" xyz="0 0.00 .145"/>
+    <origin
+      xyz="${left_tool_base_x + tool_shift_x} ${left_tool_base_y + tool_shift_y} ${left_tool_base_z + tool_shift_z}"
+      rpy="-2.35619449 3.14159265 0"/>
   </joint>
+
   <link name="right_tool" />
   <joint name="right_tool_joint" type="fixed">
-    <parent link="flange_R"/>
+    <parent link="right_gripper_base_link"/>
     <child link="right_tool"/>
-    <origin rpy="-3.14 -1.57 0" xyz="0 -0.00 .145"/>
+    <origin
+      xyz="${right_tool_base_x + tool_shift_x} ${right_tool_base_y + tool_shift_y} ${right_tool_base_z + tool_shift_z}"
+      rpy="-2.35619449 3.14159265 0"/>
   </joint>
 
 </robot>
