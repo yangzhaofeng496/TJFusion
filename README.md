@@ -3,7 +3,7 @@
 ## Install `tjfusion`
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yangzhaofeng496/TJFusion/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yangzhaofeng496/TJFusion/v0.0.2/install.sh | bash -s -- --branch=v0.0.2
 ```
 
 ## Configure
