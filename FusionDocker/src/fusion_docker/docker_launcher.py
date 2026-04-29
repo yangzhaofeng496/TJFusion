@@ -2381,6 +2381,12 @@ def _read_container_logs(
     )
     if logged.returncode != 0:
         message = logged.stderr.strip() or logged.stdout.strip()
+        lowered = message.lower()
+        if "no such container" in lowered:
+            return (
+                f"Docker container '{chosen_container.name}' is no longer present "
+                "(stopped/removed)."
+            )
         return (
             f"Unable to read docker logs for '{chosen_container.name}': {message}"
             if message

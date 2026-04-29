@@ -1155,7 +1155,7 @@ def _run_docker_launch_flow(
     *,
     docker_names_override: list[str] | None,
     list_when_empty: bool,
-) -> None:
+) -> list:
     launch_config = _load_optional_launch_config(args.launch_config)
     launch_config_path = _resolve_launch_config_path(args.launch_config)
     docker_model_root_value = args.docker_model_root or (
@@ -1232,7 +1232,7 @@ def _run_docker_launch_flow(
                 print_status("DOCKER", target, color="blue")
         else:
             print_warning("No docker names selected to launch.")
-        return
+        return []
 
     group_lookup = _build_group_lookup(launch_config)
     matches = _match_dockers_for_runtime(
@@ -1243,7 +1243,7 @@ def _run_docker_launch_flow(
     )
     if not matches:
         print_warning("No docker tasks to launch. Remote failures were skipped.")
-        return
+        return []
     if launch_parallel is None:
         launch_parallel = max(1, len(matches))
     if launch_parallel <= 0:
@@ -1308,9 +1308,10 @@ def _run_docker_launch_flow(
             )
         else:
             monitor_tmux_sessions(results, poll_interval_s=poll_interval)
-        return
+        return results
     if local_failures:
         raise RuntimeError(f"{len(local_failures)} local docker launch task(s) failed.")
+    return results
 
 
 def _handle_docker_config(args: argparse.Namespace) -> None:
