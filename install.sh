@@ -35,6 +35,7 @@ log_err() { echo -e "${C_RED}$*${C_RESET}"; }
 
 MODE="local"               # cwd | local | system
 REPO_URL="https://github.com/yangzhaofeng496/TJFusion.git"
+GIT_BRANCH="main"
 CLONE_DIR="$PWD"
 CLONE_DIR_EXPLICIT="0"
 SKIP_CLONE="0"
@@ -137,6 +138,7 @@ for arg in "$@"; do
     --skip-clone) SKIP_CLONE="1" ;;
     --skip-env-install) SKIP_ENV_INSTALL="1" ;;
     --repo-url=*) REPO_URL="${arg#*=}" ;;
+    --branch=*) GIT_BRANCH="${arg#*=}" ;;
     --clone-dir=*)
       CLONE_DIR="${arg#*=}"
       CLONE_DIR_EXPLICIT="1"
@@ -154,6 +156,7 @@ Options:
   --system                Install launcher to /usr/local/bin
   --verbose               Show full command output instead of concise logs
   --repo-url=<git_url>    Git repository URL for clone/pull (default: https://github.com/yangzhaofeng496/TJFusion.git)
+  --branch=<name>         Git branch for clone/pull (default: main)
   --clone-dir=<path>      Where to clone repository (default: current directory)
   --skip-clone            Skip git clone/pull step
   --skip-env-install      Skip system package auto-install step
@@ -368,6 +371,21 @@ is_tjfusion_repo_root() {
   [[ -d "${root}/FusionDocker/src" || -d "${root}/src/fusion_docker" ]]
 }
 
+sync_repo_branch() {
+  local repo_dir="$1"
+  local branch="$2"
+  (
+    cd "$repo_dir"
+    git fetch origin "$branch"
+    if git rev-parse --verify --quiet "refs/heads/${branch}" >/dev/null; then
+      git checkout "$branch"
+    else
+      git checkout -b "$branch" --track "origin/${branch}" 2>/dev/null || git checkout -B "$branch" "origin/${branch}"
+    fi
+    git pull --ff-only origin "$branch"
+  ) || log_warn "[install] Failed to sync ${repo_dir} to branch ${branch}. Keeping current state."
+}
+
 clone_or_update_repo() {
   if [[ "$SKIP_CLONE" == "1" ]]; then
     log_info "[install] Skip clone/pull step (--skip-clone)."
@@ -378,8 +396,8 @@ clone_or_update_repo() {
   repo_root="$(resolve_repo_root)"
   if [[ -n "$repo_root" ]]; then
     if [[ -d "${repo_root}/.git" ]]; then
-      log_info "[install] Existing git repo found: ${repo_root}. Running git pull..."
-      (cd "$repo_root" && git pull --ff-only || true)
+      log_info "[install] Existing git repo found: ${repo_root}. Syncing branch ${GIT_BRANCH}..."
+      sync_repo_branch "$repo_root" "$GIT_BRANCH"
     fi
     return 0
   fi
@@ -400,8 +418,8 @@ clone_or_update_repo() {
   if [[ -d "$target_dir" ]]; then
     if [[ -d "$target_dir/.git" ]]; then
       if is_tjfusion_repo_root "$target_dir"; then
-        log_info "[install] Existing TJFusion repo found at ${target_dir}. Running git pull..."
-        (cd "$target_dir" && git pull --ff-only || true)
+        log_info "[install] Existing TJFusion repo found at ${target_dir}. Syncing branch ${GIT_BRANCH}..."
+        sync_repo_branch "$target_dir" "$GIT_BRANCH"
         CLONE_DIR="$target_dir"
         return 0
       fi
@@ -411,8 +429,8 @@ clone_or_update_repo() {
     if [[ -n "$(ls -A "$target_dir" 2>/dev/null || true)" ]]; then
       if [[ -d "$target_dir/.git" ]]; then
         if is_tjfusion_repo_root "$target_dir"; then
-          log_info "[install] Existing TJFusion repo found at ${target_dir}. Running git pull..."
-          (cd "$target_dir" && git pull --ff-only || true)
+          log_info "[install] Existing TJFusion repo found at ${target_dir}. Syncing branch ${GIT_BRANCH}..."
+          sync_repo_branch "$target_dir" "$GIT_BRANCH"
           CLONE_DIR="$target_dir"
           return 0
         fi
@@ -439,8 +457,8 @@ clone_or_update_repo() {
     fi
   fi
 
-  log_info "[install] Cloning repository from ${REPO_URL} to ${target_dir}"
-  git clone "$REPO_URL" "$target_dir"
+  log_info "[install] Cloning repository from ${REPO_URL} to ${target_dir} (branch: ${GIT_BRANCH})"
+  git clone --branch "$GIT_BRANCH" --single-branch "$REPO_URL" "$target_dir"
   CLONE_DIR="$target_dir"
 }
 
