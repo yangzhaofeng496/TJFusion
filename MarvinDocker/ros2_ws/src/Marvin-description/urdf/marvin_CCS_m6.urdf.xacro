@@ -7,9 +7,9 @@
   <xacro:include filename="stand_v3.urf.xacro" />
   <xacro:arg name="gripper_debug" default="false" />
   <xacro:property name="left_gripper_mount_xyz" value="0 0 0" />
-  <xacro:property name="left_gripper_mount_rpy" value="0 0 0" />
+  <xacro:property name="left_gripper_mount_rpy" value="0 0 -1.5708" />
   <xacro:property name="right_gripper_mount_xyz" value="0 0 0" />
-  <xacro:property name="right_gripper_mount_rpy" value="0 0 0" />
+  <xacro:property name="right_gripper_mount_rpy" value="0 0 -1.5708" />
   <xacro:property name="left_tool_base_x" value="${-0.0116961}" />
   <xacro:property name="left_tool_base_y" value="${-0.0901059}" />
   <xacro:property name="left_tool_base_z" value="${0.15047615}" />

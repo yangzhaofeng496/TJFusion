@@ -19,24 +19,38 @@
         <group name="left_arm"/>
         <group name="right_arm"/>
     </group>
+    <group name="left_ee">
+        <link name="left_tool"/>
+    </group>
+    <group name="right_ee">
+        <link name="right_tool"/>
+    </group>
     <!--GROUP STATES: Purpose: Define a named state for a particular group, in terms of joint values. This is useful to define states like 'folded arms'-->
     <group_state name="home" group="both_arm">
-        <joint name="Joint1_L" value="0"/>
-        <joint name="Joint1_R" value="0"/>
-        <joint name="Joint2_L" value="0"/>
-        <joint name="Joint2_R" value="0"/>
-        <joint name="Joint3_L" value="0"/>
-        <joint name="Joint3_R" value="-0.111"/>
-        <joint name="Joint4_L" value="0"/>
-        <joint name="Joint4_R" value="0"/>
-        <joint name="Joint5_L" value="0"/>
-        <joint name="Joint5_R" value="0"/>
-        <joint name="Joint6_L" value="0"/>
-        <joint name="Joint6_R" value="0"/>
-        <joint name="Joint7_L" value="0"/>
-        <joint name="Joint7_R" value="0"/>
+        <joint name="Joint1_L" value="2.61479"/>
+        <joint name="Joint1_R" value="-2.62467"/>
+        <joint name="Joint2_L" value="-1.59871"/>
+        <joint name="Joint2_R" value="-1.60188"/>
+        <joint name="Joint3_L" value="-1.85433"/>
+        <joint name="Joint3_R" value="1.82629"/>
+        <joint name="Joint4_L" value="-2.27467"/>
+        <joint name="Joint4_R" value="-2.28101"/>
+        <joint name="Joint5_L" value="-0.216093"/>
+        <joint name="Joint5_R" value="0.213259"/>
+        <joint name="Joint6_L" value="-0.304625"/>
+        <joint name="Joint6_R" value="-0.316744"/>
+        <joint name="Joint7_L" value="-0.203511"/>
+        <joint name="Joint7_R" value="0.226068"/>
+        <joint name="left_gripper_left_finger_joint" value="0"/>
+        <joint name="left_gripper_right_finger_joint" value="0"/>
+        <joint name="right_gripper_left_finger_joint" value="0"/>
+        <joint name="right_gripper_right_finger_joint" value="0"/>
     </group_state>
-    <!--END EFFECTOR: Not explicitly configured; tool tips are used as arm chain tips.-->
+    <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
+    <end_effector name="left_eef" parent_link="left_tool" group="left_ee" parent_group="left_arm"/>
+    <end_effector name="right_eef" parent_link="right_tool" group="right_ee" parent_group="right_arm"/>
+    <!--VIRTUAL JOINT: Purpose: this element defines a virtual joint between a robot link and an external frame of reference (considered fixed with respect to the robot)-->
+    <virtual_joint name="vr_joint" type="fixed" parent_frame="world" child_link="base_link"/>
     <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
     <disable_collisions link1="Base_L" link2="Base_R" reason="Never"/>
     <disable_collisions link1="Base_L" link2="Link1_L" reason="Adjacent"/>
@@ -68,7 +82,6 @@
     <disable_collisions link1="Link1_L" link2="Link6_L" reason="Never"/>
     <disable_collisions link1="Link1_L" link2="Link7_L" reason="Never"/>
     <disable_collisions link1="Link1_L" link2="base_link" reason="Default"/>
-    <disable_collisions link1="Link1_L" link2="left_gripper_right_finger_link" reason="Never"/>
     <disable_collisions link1="Link1_R" link2="Link2_L" reason="Never"/>
     <disable_collisions link1="Link1_R" link2="Link2_R" reason="Adjacent"/>
     <disable_collisions link1="Link1_R" link2="Link3_L" reason="Never"/>
@@ -96,16 +109,13 @@
     <disable_collisions link1="Link2_R" link2="Link6_R" reason="Never"/>
     <disable_collisions link1="Link2_R" link2="Link7_R" reason="Never"/>
     <disable_collisions link1="Link2_R" link2="base_link" reason="Never"/>
-    <disable_collisions link1="Link3_L" link2="Link3_R" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="Link4_L" reason="Adjacent"/>
-    <disable_collisions link1="Link3_L" link2="Link4_R" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="Link5_L" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="Link6_L" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="Link7_L" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="left_gripper_base_link" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="left_gripper_left_finger_link" reason="Never"/>
     <disable_collisions link1="Link3_L" link2="left_gripper_right_finger_link" reason="Never"/>
-    <disable_collisions link1="Link3_R" link2="Link4_L" reason="Never"/>
     <disable_collisions link1="Link3_R" link2="Link4_R" reason="Adjacent"/>
     <disable_collisions link1="Link3_R" link2="Link5_R" reason="Never"/>
     <disable_collisions link1="Link3_R" link2="Link6_R" reason="Never"/>
@@ -150,7 +160,8 @@
     <disable_collisions link1="left_gripper_base_link" link2="left_gripper_left_finger_link" reason="Adjacent"/>
     <disable_collisions link1="left_gripper_base_link" link2="left_gripper_right_finger_link" reason="Adjacent"/>
     <disable_collisions link1="left_gripper_left_finger_link" link2="left_gripper_right_finger_link" reason="Never"/>
-    <disable_collisions link1="left_gripper_right_finger_link" link2="right_gripper_right_finger_link" reason="Never"/>
+    <disable_collisions link1="left_gripper_left_finger_link" link2="right_gripper_left_finger_link" reason="Never"/>
+    <disable_collisions link1="left_gripper_left_finger_link" link2="right_gripper_right_finger_link" reason="Never"/>
     <disable_collisions link1="right_gripper_base_link" link2="right_gripper_left_finger_link" reason="Adjacent"/>
     <disable_collisions link1="right_gripper_base_link" link2="right_gripper_right_finger_link" reason="Adjacent"/>
     <disable_collisions link1="right_gripper_left_finger_link" link2="right_gripper_right_finger_link" reason="Never"/>

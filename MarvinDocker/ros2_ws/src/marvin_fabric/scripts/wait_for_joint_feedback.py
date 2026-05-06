@@ -43,13 +43,16 @@ def main() -> None:
 
     if node.got_message:
         node.get_logger().info("Received first real joint feedback, continue startup.")
+        exit_code = 0
     else:
         node.get_logger().warn(
-            "Timeout waiting joint feedback. Continue startup anyway."
+            "Timeout waiting joint feedback."
         )
+        exit_code = 1
 
     node.destroy_node()
     rclpy.shutdown()
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":
