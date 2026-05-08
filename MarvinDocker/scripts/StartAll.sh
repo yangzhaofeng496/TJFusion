@@ -47,7 +47,7 @@ tmux select-pane -t "${SESSION_MAIN}:0.4" -T "ACTION_BRIDGE"
 tmux send-keys -t "${SESSION_MAIN}:0.0" "bash -lc '${SET_ROS_DOMAIN_ID}; ${PRELUDE}; ros2 launch marvin_fabric planner_m6.launch.py'" C-m
 tmux send-keys -t "${SESSION_MAIN}:0.1" "bash -lc '${SET_ROS_DOMAIN_ID}; ${PRELUDE}; sleep 5; ros2 launch dm_gripper_py dm_gripper.launch.py'" C-m
 tmux send-keys -t "${SESSION_MAIN}:0.3" "bash -lc '${SET_ROS_DOMAIN_ID}; ${PRELUDE}; sleep 8 && python3 ${WS}/src/marvin_fabric/scripts/world/test_task_manager_dynamic0323.py'" C-m
-tmux send-keys -t "${SESSION_MAIN}:0.2" "${SET_ROS_DOMAIN_ID}; bash -lc 'bash /scripts/ServiceCall.sh'" C-m
+tmux send-keys -t "${SESSION_MAIN}:0.2" "bash -lc '${SET_ROS_DOMAIN_ID}; ${PRELUDE}; ros2 run marvin_fabric robot_mode_initializer.py --ros-args -p desired_mode:=3 -p max_retries:=0'" C-m
 tmux send-keys -t "${SESSION_MAIN}:0.4" "bash -lc '${SET_ROS_DOMAIN_ID}; ${PRELUDE}; python3 /scripts/zmq2ros.py --zmq_addr ${ACTION_ZMQ_ADDR} --zmq_topic ${ACTION_ZMQ_TOPIC}'" C-m
 
 tmux select-layout -t "${SESSION_MAIN}:0" tiled

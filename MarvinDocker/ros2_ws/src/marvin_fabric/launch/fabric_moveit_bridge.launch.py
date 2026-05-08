@@ -124,6 +124,21 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "INFO"],
     )
 
+    robot_mode_initializer = Node(
+        condition=IfCondition(use_real_hardware_cfg),
+        package="marvin_fabric",
+        executable="robot_mode_initializer.py",
+        name="robot_mode_initializer",
+        output="screen",
+        parameters=[
+            {
+                "desired_mode": 3,
+                "wait_for_arm_state": True,
+                "max_retries": 0,
+            }
+        ],
+    )
+
     wait_feedback_node = Node(
         condition=IfCondition(use_real_hardware_cfg),
         package="marvin_fabric",
@@ -279,6 +294,7 @@ def generate_launch_description():
             preview_planner_node,
             preview_display_node,
             real_hardware_node,
+            robot_mode_initializer,
             wait_feedback_node,
             start_moveit_after_feedback,
             offline_feedback,

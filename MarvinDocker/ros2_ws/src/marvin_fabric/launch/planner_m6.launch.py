@@ -17,6 +17,17 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='marvin_fabric',
+            executable='robot_mode_initializer.py',
+            name='robot_mode_initializer',
+            output='screen',
+            parameters=[{
+                "desired_mode": 3,
+                "wait_for_arm_state": True,
+                "max_retries": 0,
+            }]
+        ),
+        Node(
+            package='marvin_fabric',
             executable='planner_node',
             name='planner_node',
             parameters=[config],

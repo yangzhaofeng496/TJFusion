@@ -112,6 +112,7 @@ install(PROGRAMS
   scripts/fabric_offline_feedback.py
   scripts/moveit_goal_bridge.py
   scripts/fabric_plan_preview.py
+  scripts/robot_mode_initializer.py
   scripts/wait_for_joint_feedback.py
   scripts/vla_client.py
   scripts/world/test_task_manager_dynamic.py
