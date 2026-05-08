@@ -24,7 +24,7 @@ def generate_launch_description():
                     "--once",
                     "/joint_states",
                     "sensor_msgs/msg/JointState",
-                    "{name: ['Joint1_L','Joint2_L','Joint3_L','Joint4_L','Joint5_L','Joint6_L','Joint7_L','Joint1_R','Joint2_R','Joint3_R','Joint4_R','Joint5_R','Joint6_R','Joint7_R','left_gripper_left_finger_joint','left_gripper_right_finger_joint','right_gripper_left_finger_joint','right_gripper_right_finger_joint'], position: [2.61479,-1.59871,-1.85433,-2.27467,-0.216093,-0.304625,-0.203511,-2.62467,-1.60188,1.82629,-2.28101,0.213259,-0.316744,0.226068,0.0,0.0,0.0,0.0]}",
+                    "{name: ['Joint1_L','Joint2_L','Joint3_L','Joint4_L','Joint5_L','Joint6_L','Joint7_L','Joint1_R','Joint2_R','Joint3_R','Joint4_R','Joint5_R','Joint6_R','Joint7_R'], position: [2.61479,-1.59871,-1.85433,-2.27467,-0.216093,-0.304625,-0.203511,-2.62467,-1.60188,1.82629,-2.28101,0.213259,-0.316744,0.226068]}",
                 ],
                 output="screen",
             )
