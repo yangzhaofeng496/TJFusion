@@ -208,6 +208,7 @@ def generate_launch_description():
                 "output_frame_id": "base_link",
                 "publish_on_execute_only": LaunchConfiguration("publish_on_execute_only"),
                 "publish_preview_on_plan": LaunchConfiguration("enable_fabric_plan_preview"),
+                "publish_preview_always": True,
                 "move_action_status_topic": "",
                 "execute_status_topic": "",
                 "preview_target_topic_left": "fabric_preview/target_poseL",

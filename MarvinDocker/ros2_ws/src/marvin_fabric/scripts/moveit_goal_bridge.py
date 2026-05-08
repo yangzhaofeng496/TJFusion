@@ -34,6 +34,7 @@ class MoveItGoalBridge(Node):
         self.declare_parameter("output_frame_id", "base_link")
         self.declare_parameter("publish_on_execute_only", True)
         self.declare_parameter("publish_preview_on_plan", True)
+        self.declare_parameter("publish_preview_always", True)
         self.declare_parameter("move_action_status_topic", "")
         self.declare_parameter("move_action_feedback_topic", "")
         self.declare_parameter("execute_status_topic", "")
@@ -49,6 +50,7 @@ class MoveItGoalBridge(Node):
         self.output_frame_id = str(self.get_parameter("output_frame_id").value)
         self.publish_on_execute_only = bool(self.get_parameter("publish_on_execute_only").value)
         self.publish_preview_on_plan = bool(self.get_parameter("publish_preview_on_plan").value)
+        self.publish_preview_always = bool(self.get_parameter("publish_preview_always").value)
         self.move_action_status_topic = str(self.get_parameter("move_action_status_topic").value)
         self.move_action_feedback_topic = str(self.get_parameter("move_action_feedback_topic").value)
         self.execute_status_topic = str(self.get_parameter("execute_status_topic").value)
@@ -103,6 +105,7 @@ class MoveItGoalBridge(Node):
             f"default_side={self.default_side}, explicit_feedback='{self.feedback_topic}', "
             f"explicit_update='{self.update_topic}', publish_on_execute_only={self.publish_on_execute_only}, "
             f"publish_preview_on_plan={self.publish_preview_on_plan}, "
+            f"publish_preview_always={self.publish_preview_always}, "
             f"move_action_status_topic='{self.move_action_status_topic}', "
             f"move_action_feedback_topic='{self.move_action_feedback_topic}', "
             f"execute_status_topic='{self.execute_status_topic}'"
@@ -252,8 +255,11 @@ class MoveItGoalBridge(Node):
             right_pub.publish(right_pose)
 
     def _tick(self) -> None:
-        # Preview path generation during MoveIt planning (without robot execution).
-        if self.publish_preview_on_plan and self.move_action_active and not self.execute_active:
+        # Preview path generation through Fabric for marker drag and planning.
+        preview_active = self.publish_preview_on_plan and not self.execute_active
+        if preview_active and not self.publish_preview_always:
+            preview_active = self.move_action_active
+        if preview_active:
             self._publish_grips(self.preview_left_grip_pub, self.preview_right_grip_pub)
             self._publish_targets(
                 self.left_pose,
