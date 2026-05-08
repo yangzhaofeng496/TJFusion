@@ -183,6 +183,12 @@ def generate_launch_description():
         description="true: run Fabric planner+bridge (robot can move); false: feedback-to-MoveIt only",
     )
 
+    publish_on_execute_only_arg = DeclareLaunchArgument(
+        "publish_on_execute_only",
+        default_value="true",
+        description="true: bridge publishes control only while MoveIt execute action is active",
+    )
+
     moveit_bridge = Node(
         condition=IfCondition(LaunchConfiguration("enable_fabric_control")),
         package="marvin_fabric",
@@ -195,6 +201,8 @@ def generate_launch_description():
                 "default_side": "right",
                 "publish_rate_hz": 30.0,
                 "output_frame_id": "base_link",
+                "publish_on_execute_only": LaunchConfiguration("publish_on_execute_only"),
+                "execute_status_topic": "",
             }
         ],
     )
@@ -204,6 +212,7 @@ def generate_launch_description():
             use_real_hardware_arg,
             simulate_robot_motion_arg,
             enable_fabric_control_arg,
+            publish_on_execute_only_arg,
             feedback_topic_arg,
             moveit_demo,
             planner_node,

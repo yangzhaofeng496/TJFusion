@@ -3,6 +3,7 @@ import re
 from typing import Dict, Set
 
 import rclpy
+from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from std_msgs.msg import Bool
@@ -29,12 +30,17 @@ class MoveItGoalBridge(Node):
         self.declare_parameter("default_side", "right")
         self.declare_parameter("publish_rate_hz", 30.0)
         self.declare_parameter("output_frame_id", "base_link")
+        self.declare_parameter("publish_on_execute_only", True)
+        self.declare_parameter("execute_status_topic", "")
 
         self.feedback_topic = str(self.get_parameter("feedback_topic").value)
         self.update_topic = str(self.get_parameter("update_topic").value)
         self.default_side = str(self.get_parameter("default_side").value).lower()
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         self.output_frame_id = str(self.get_parameter("output_frame_id").value)
+        self.publish_on_execute_only = bool(self.get_parameter("publish_on_execute_only").value)
+        self.execute_status_topic = str(self.get_parameter("execute_status_topic").value)
+        self.execute_active = not self.publish_on_execute_only
 
         self.left_pub = self.create_publisher(PoseStamped, "control/target_poseL", 10)
         self.right_pub = self.create_publisher(PoseStamped, "control/target_poseR", 10)
@@ -44,12 +50,15 @@ class MoveItGoalBridge(Node):
         self.left_pose = None
         self.right_pose = None
         self._subs: Dict[str, object] = {}
+        self._execute_status_sub = None
         self._log_once: Set[str] = set()
 
         if self.feedback_topic:
             self._subscribe_feedback(self.feedback_topic)
         if self.update_topic:
             self._subscribe_update(self.update_topic)
+        if self.execute_status_topic:
+            self._subscribe_execute_status(self.execute_status_topic)
         # Auto discover MoveIt interactive marker topics if explicit topics are not set.
         self.discovery_timer = self.create_timer(1.0, self._discover_topics)
 
@@ -58,7 +67,8 @@ class MoveItGoalBridge(Node):
         self.get_logger().info(
             "MoveIt bridge started. "
             f"default_side={self.default_side}, explicit_feedback='{self.feedback_topic}', "
-            f"explicit_update='{self.update_topic}'"
+            f"explicit_update='{self.update_topic}', publish_on_execute_only={self.publish_on_execute_only}, "
+            f"execute_status_topic='{self.execute_status_topic}'"
         )
 
     def _feedback_cb(self, msg: InteractiveMarkerFeedback) -> None:
@@ -101,6 +111,26 @@ class MoveItGoalBridge(Node):
         self._subs[topic] = sub
         self.get_logger().info(f"Subscribed update: {topic}")
 
+    def _subscribe_execute_status(self, topic: str) -> None:
+        if self._execute_status_sub is not None:
+            return
+        self._execute_status_sub = self.create_subscription(
+            GoalStatusArray, topic, self._execute_status_cb, 10
+        )
+        self.get_logger().info(f"Subscribed execute status: {topic}")
+
+    def _execute_status_cb(self, msg: GoalStatusArray) -> None:
+        active_states = {
+            GoalStatus.STATUS_ACCEPTED,
+            GoalStatus.STATUS_EXECUTING,
+            GoalStatus.STATUS_CANCELING,
+        }
+        active = any(st.status in active_states for st in msg.status_list)
+        if active == self.execute_active:
+            return
+        self.execute_active = active
+        self.get_logger().info(f"Execute active -> {self.execute_active}")
+
     def _discover_topics(self) -> None:
         topic_map = dict(self.get_topic_names_and_types())
         for name, types in topic_map.items():
@@ -116,8 +146,16 @@ class MoveItGoalBridge(Node):
                 and "visualization_msgs/msg/InteractiveMarkerUpdate" in types
             ):
                 self._subscribe_update(name)
+            if self.publish_on_execute_only and self._execute_status_sub is None and (
+                name.endswith("move_action/_action/status")
+                or name.endswith("execute_trajectory/_action/status")
+            ) and "action_msgs/msg/GoalStatusArray" in types:
+                self._subscribe_execute_status(name)
 
     def _tick(self) -> None:
+        if self.publish_on_execute_only and not self.execute_active:
+            return
+
         on = Bool()
         on.data = True
         self.left_grip_pub.publish(on)
