@@ -188,6 +188,11 @@ def generate_launch_description():
         default_value="true",
         description="true: bridge publishes control only while MoveIt execute action is active",
     )
+    enable_fabric_plan_preview_arg = DeclareLaunchArgument(
+        "enable_fabric_plan_preview",
+        default_value="true",
+        description="true: run Fabric dry-run preview path generation for MoveIt Plan",
+    )
 
     moveit_bridge = Node(
         condition=IfCondition(LaunchConfiguration("enable_fabric_control")),
@@ -202,7 +207,60 @@ def generate_launch_description():
                 "publish_rate_hz": 30.0,
                 "output_frame_id": "base_link",
                 "publish_on_execute_only": LaunchConfiguration("publish_on_execute_only"),
+                "publish_preview_on_plan": LaunchConfiguration("enable_fabric_plan_preview"),
+                "move_action_status_topic": "",
                 "execute_status_topic": "",
+                "preview_target_topic_left": "fabric_preview/target_poseL",
+                "preview_target_topic_right": "fabric_preview/target_poseR",
+                "preview_grip_topic_left": "fabric_preview/gripL",
+                "preview_grip_topic_right": "fabric_preview/gripR",
+            }
+        ],
+    )
+
+    preview_planner_node = Node(
+        condition=IfCondition(LaunchConfiguration("enable_fabric_plan_preview")),
+        package="marvin_fabric",
+        executable="planner_node",
+        name="planner_node_preview",
+        parameters=[config],
+        remappings=[
+            ("control/target_poseL", "fabric_preview/target_poseL"),
+            ("control/target_poseR", "fabric_preview/target_poseR"),
+            ("control/gripL", "fabric_preview/gripL"),
+            ("control/gripR", "fabric_preview/gripR"),
+            ("control/joint_cmd_A", "fabric_preview/joint_cmd_A"),
+            ("control/joint_cmd_B", "fabric_preview/joint_cmd_B"),
+            ("joint_states", "fabric_preview/joint_states"),
+            ("eef_pose", "fabric_preview/eef_pose"),
+            ("collision_spheres", "fabric_preview/collision_spheres"),
+            ("fabric_markers", "fabric_preview/fabric_markers"),
+            ("arm/eef_state", "fabric_preview/eef_state"),
+            ("info/eef_left", "fabric_preview/eef_left"),
+            ("info/eef_right", "fabric_preview/eef_right"),
+            ("test_pub", "fabric_preview/test_pub"),
+            ("reset_left_arm", "fabric_preview/reset_left_arm"),
+            ("reset_right_arm", "fabric_preview/reset_right_arm"),
+        ],
+        output="screen",
+        arguments=["--ros-args", "--log-level", "INFO"],
+    )
+
+    preview_display_node = Node(
+        condition=IfCondition(LaunchConfiguration("enable_fabric_plan_preview")),
+        package="marvin_fabric",
+        executable="fabric_plan_preview.py",
+        name="fabric_plan_preview",
+        output="screen",
+        parameters=[
+            {
+                "plan_status_topic": "",
+                "execute_status_topic": "",
+                "joint_cmd_a_topic": "fabric_preview/joint_cmd_A",
+                "joint_cmd_b_topic": "fabric_preview/joint_cmd_B",
+                "display_topic": "/display_planned_path",
+                "publish_rate_hz": 30.0,
+                "model_id": "marvin_robot",
             }
         ],
     )
@@ -213,9 +271,12 @@ def generate_launch_description():
             simulate_robot_motion_arg,
             enable_fabric_control_arg,
             publish_on_execute_only_arg,
+            enable_fabric_plan_preview_arg,
             feedback_topic_arg,
             moveit_demo,
             planner_node,
+            preview_planner_node,
+            preview_display_node,
             real_hardware_node,
             wait_feedback_node,
             start_moveit_after_feedback,

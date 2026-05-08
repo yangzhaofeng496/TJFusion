@@ -31,7 +31,13 @@ class MoveItGoalBridge(Node):
         self.declare_parameter("publish_rate_hz", 30.0)
         self.declare_parameter("output_frame_id", "base_link")
         self.declare_parameter("publish_on_execute_only", True)
+        self.declare_parameter("publish_preview_on_plan", True)
+        self.declare_parameter("move_action_status_topic", "")
         self.declare_parameter("execute_status_topic", "")
+        self.declare_parameter("preview_target_topic_left", "fabric_preview/target_poseL")
+        self.declare_parameter("preview_target_topic_right", "fabric_preview/target_poseR")
+        self.declare_parameter("preview_grip_topic_left", "fabric_preview/gripL")
+        self.declare_parameter("preview_grip_topic_right", "fabric_preview/gripR")
 
         self.feedback_topic = str(self.get_parameter("feedback_topic").value)
         self.update_topic = str(self.get_parameter("update_topic").value)
@@ -39,17 +45,29 @@ class MoveItGoalBridge(Node):
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         self.output_frame_id = str(self.get_parameter("output_frame_id").value)
         self.publish_on_execute_only = bool(self.get_parameter("publish_on_execute_only").value)
+        self.publish_preview_on_plan = bool(self.get_parameter("publish_preview_on_plan").value)
+        self.move_action_status_topic = str(self.get_parameter("move_action_status_topic").value)
         self.execute_status_topic = str(self.get_parameter("execute_status_topic").value)
-        self.execute_active = not self.publish_on_execute_only
+        self.preview_target_topic_left = str(self.get_parameter("preview_target_topic_left").value)
+        self.preview_target_topic_right = str(self.get_parameter("preview_target_topic_right").value)
+        self.preview_grip_topic_left = str(self.get_parameter("preview_grip_topic_left").value)
+        self.preview_grip_topic_right = str(self.get_parameter("preview_grip_topic_right").value)
+        self.move_action_active = False
+        self.execute_active = False
 
         self.left_pub = self.create_publisher(PoseStamped, "control/target_poseL", 10)
         self.right_pub = self.create_publisher(PoseStamped, "control/target_poseR", 10)
         self.left_grip_pub = self.create_publisher(Bool, "control/gripL", 10)
         self.right_grip_pub = self.create_publisher(Bool, "control/gripR", 10)
+        self.preview_left_pub = self.create_publisher(PoseStamped, self.preview_target_topic_left, 10)
+        self.preview_right_pub = self.create_publisher(PoseStamped, self.preview_target_topic_right, 10)
+        self.preview_left_grip_pub = self.create_publisher(Bool, self.preview_grip_topic_left, 10)
+        self.preview_right_grip_pub = self.create_publisher(Bool, self.preview_grip_topic_right, 10)
 
         self.left_pose = None
         self.right_pose = None
         self._subs: Dict[str, object] = {}
+        self._move_status_sub = None
         self._execute_status_sub = None
         self._log_once: Set[str] = set()
 
@@ -57,6 +75,8 @@ class MoveItGoalBridge(Node):
             self._subscribe_feedback(self.feedback_topic)
         if self.update_topic:
             self._subscribe_update(self.update_topic)
+        if self.move_action_status_topic:
+            self._subscribe_move_status(self.move_action_status_topic)
         if self.execute_status_topic:
             self._subscribe_execute_status(self.execute_status_topic)
         # Auto discover MoveIt interactive marker topics if explicit topics are not set.
@@ -68,6 +88,8 @@ class MoveItGoalBridge(Node):
             "MoveIt bridge started. "
             f"default_side={self.default_side}, explicit_feedback='{self.feedback_topic}', "
             f"explicit_update='{self.update_topic}', publish_on_execute_only={self.publish_on_execute_only}, "
+            f"publish_preview_on_plan={self.publish_preview_on_plan}, "
+            f"move_action_status_topic='{self.move_action_status_topic}', "
             f"execute_status_topic='{self.execute_status_topic}'"
         )
 
@@ -111,6 +133,26 @@ class MoveItGoalBridge(Node):
         self._subs[topic] = sub
         self.get_logger().info(f"Subscribed update: {topic}")
 
+    def _subscribe_move_status(self, topic: str) -> None:
+        if self._move_status_sub is not None:
+            return
+        self._move_status_sub = self.create_subscription(
+            GoalStatusArray, topic, self._move_status_cb, 10
+        )
+        self.get_logger().info(f"Subscribed move action status: {topic}")
+
+    def _move_status_cb(self, msg: GoalStatusArray) -> None:
+        active_states = {
+            GoalStatus.STATUS_ACCEPTED,
+            GoalStatus.STATUS_EXECUTING,
+            GoalStatus.STATUS_CANCELING,
+        }
+        active = any(st.status in active_states for st in msg.status_list)
+        if active == self.move_action_active:
+            return
+        self.move_action_active = active
+        self.get_logger().info(f"Move action active -> {self.move_action_active}")
+
     def _subscribe_execute_status(self, topic: str) -> None:
         if self._execute_status_sub is not None:
             return
@@ -146,27 +188,51 @@ class MoveItGoalBridge(Node):
                 and "visualization_msgs/msg/InteractiveMarkerUpdate" in types
             ):
                 self._subscribe_update(name)
-            if self.publish_on_execute_only and self._execute_status_sub is None and (
-                name.endswith("move_action/_action/status")
-                or name.endswith("execute_trajectory/_action/status")
-            ) and "action_msgs/msg/GoalStatusArray" in types:
+            if self._move_status_sub is None and name.endswith("move_action/_action/status") and (
+                "action_msgs/msg/GoalStatusArray" in types
+            ):
+                self._subscribe_move_status(name)
+            if self._execute_status_sub is None and name.endswith("execute_trajectory/_action/status") and (
+                "action_msgs/msg/GoalStatusArray" in types
+            ):
                 self._subscribe_execute_status(name)
 
-    def _tick(self) -> None:
-        if self.publish_on_execute_only and not self.execute_active:
-            return
-
+    def _publish_grips(self, left_pub, right_pub) -> None:
         on = Bool()
         on.data = True
-        self.left_grip_pub.publish(on)
-        self.right_grip_pub.publish(on)
+        left_pub.publish(on)
+        right_pub.publish(on)
 
-        if self.left_pose is not None:
-            self.left_pose.header.stamp = self.get_clock().now().to_msg()
-            self.left_pub.publish(self.left_pose)
-        if self.right_pose is not None:
-            self.right_pose.header.stamp = self.get_clock().now().to_msg()
-            self.right_pub.publish(self.right_pose)
+    def _publish_targets(self, left_pose, right_pose, left_pub, right_pub) -> None:
+        now = self.get_clock().now().to_msg()
+        if left_pose is not None:
+            left_pose.header.stamp = now
+            left_pub.publish(left_pose)
+        if right_pose is not None:
+            right_pose.header.stamp = now
+            right_pub.publish(right_pose)
+
+    def _tick(self) -> None:
+        # Preview path generation during MoveIt planning (without robot execution).
+        if self.publish_preview_on_plan and self.move_action_active and not self.execute_active:
+            self._publish_grips(self.preview_left_grip_pub, self.preview_right_grip_pub)
+            self._publish_targets(
+                self.left_pose,
+                self.right_pose,
+                self.preview_left_pub,
+                self.preview_right_pub,
+            )
+
+        # Real control path (to Fabric planner that drives hardware path).
+        control_active = True
+        if self.publish_on_execute_only:
+            # Prefer ExecuteTrajectory status; fallback to move_action if execute status is unavailable.
+            control_active = self.execute_active if self._execute_status_sub is not None else self.move_action_active
+        if not control_active:
+            return
+
+        self._publish_grips(self.left_grip_pub, self.right_grip_pub)
+        self._publish_targets(self.left_pose, self.right_pose, self.left_pub, self.right_pub)
 
 
 def main() -> None:
