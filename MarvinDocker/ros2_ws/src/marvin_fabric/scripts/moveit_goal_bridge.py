@@ -226,9 +226,8 @@ class MoveItGoalBridge(Node):
         # Real control path (to Fabric planner that drives hardware path).
         control_active = True
         if self.publish_on_execute_only:
-            # Some MoveIt flows expose activity on move_action, some on execute_trajectory.
-            # Allow either active source to enable control publishing.
-            control_active = self.move_action_active or self.execute_active
+            # Strict mode: only execute stage can drive real control outputs.
+            control_active = self.execute_active
         if not control_active:
             return
 
