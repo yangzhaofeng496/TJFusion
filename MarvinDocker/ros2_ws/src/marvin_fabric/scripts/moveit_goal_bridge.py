@@ -5,7 +5,9 @@ from typing import Dict, Set
 import rclpy
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import PoseStamped
+from moveit_msgs.action import MoveGroup
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 from visualization_msgs.msg import InteractiveMarkerFeedback, InteractiveMarkerUpdate
 
@@ -33,6 +35,7 @@ class MoveItGoalBridge(Node):
         self.declare_parameter("publish_on_execute_only", True)
         self.declare_parameter("publish_preview_on_plan", True)
         self.declare_parameter("move_action_status_topic", "")
+        self.declare_parameter("move_action_feedback_topic", "")
         self.declare_parameter("execute_status_topic", "")
         self.declare_parameter("preview_target_topic_left", "fabric_preview/target_poseL")
         self.declare_parameter("preview_target_topic_right", "fabric_preview/target_poseR")
@@ -47,6 +50,7 @@ class MoveItGoalBridge(Node):
         self.publish_on_execute_only = bool(self.get_parameter("publish_on_execute_only").value)
         self.publish_preview_on_plan = bool(self.get_parameter("publish_preview_on_plan").value)
         self.move_action_status_topic = str(self.get_parameter("move_action_status_topic").value)
+        self.move_action_feedback_topic = str(self.get_parameter("move_action_feedback_topic").value)
         self.execute_status_topic = str(self.get_parameter("execute_status_topic").value)
         self.preview_target_topic_left = str(self.get_parameter("preview_target_topic_left").value)
         self.preview_target_topic_right = str(self.get_parameter("preview_target_topic_right").value)
@@ -54,6 +58,7 @@ class MoveItGoalBridge(Node):
         self.preview_grip_topic_right = str(self.get_parameter("preview_grip_topic_right").value)
         self.move_action_active = False
         self.execute_active = False
+        self.move_execute_hint = False
 
         self.left_pub = self.create_publisher(PoseStamped, "control/target_poseL", 10)
         self.right_pub = self.create_publisher(PoseStamped, "control/target_poseR", 10)
@@ -68,8 +73,15 @@ class MoveItGoalBridge(Node):
         self.right_pose = None
         self._subs: Dict[str, object] = {}
         self._move_status_sub = None
+        self._move_feedback_sub = None
         self._execute_status_sub = None
         self._log_once: Set[str] = set()
+        self._action_status_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
 
         if self.feedback_topic:
             self._subscribe_feedback(self.feedback_topic)
@@ -77,6 +89,8 @@ class MoveItGoalBridge(Node):
             self._subscribe_update(self.update_topic)
         if self.move_action_status_topic:
             self._subscribe_move_status(self.move_action_status_topic)
+        if self.move_action_feedback_topic:
+            self._subscribe_move_feedback(self.move_action_feedback_topic)
         if self.execute_status_topic:
             self._subscribe_execute_status(self.execute_status_topic)
         # Auto discover MoveIt interactive marker topics if explicit topics are not set.
@@ -90,6 +104,7 @@ class MoveItGoalBridge(Node):
             f"explicit_update='{self.update_topic}', publish_on_execute_only={self.publish_on_execute_only}, "
             f"publish_preview_on_plan={self.publish_preview_on_plan}, "
             f"move_action_status_topic='{self.move_action_status_topic}', "
+            f"move_action_feedback_topic='{self.move_action_feedback_topic}', "
             f"execute_status_topic='{self.execute_status_topic}'"
         )
 
@@ -137,7 +152,7 @@ class MoveItGoalBridge(Node):
         if self._move_status_sub is not None:
             return
         self._move_status_sub = self.create_subscription(
-            GoalStatusArray, topic, self._move_status_cb, 10
+            GoalStatusArray, topic, self._move_status_cb, self._action_status_qos
         )
         self.get_logger().info(f"Subscribed move action status: {topic}")
 
@@ -151,13 +166,33 @@ class MoveItGoalBridge(Node):
         if active == self.move_action_active:
             return
         self.move_action_active = active
+        if not self.move_action_active and self.move_execute_hint:
+            self.move_execute_hint = False
+            self.get_logger().info("Move execute hint -> False (move action inactive)")
         self.get_logger().info(f"Move action active -> {self.move_action_active}")
+
+    def _subscribe_move_feedback(self, topic: str) -> None:
+        if self._move_feedback_sub is not None:
+            return
+        self._move_feedback_sub = self.create_subscription(
+            MoveGroup.FeedbackMessage, topic, self._move_feedback_cb, 10
+        )
+        self.get_logger().info(f"Subscribed move action feedback: {topic}")
+
+    def _move_feedback_cb(self, msg: MoveGroup.FeedbackMessage) -> None:
+        state = str(msg.feedback.state).strip().upper()
+        execute_like_states = {"MONITOR", "EXECUTING"}
+        hint = state in execute_like_states
+        if hint == self.move_execute_hint:
+            return
+        self.move_execute_hint = hint
+        self.get_logger().info(f"Move execute hint -> {self.move_execute_hint} (state='{state}')")
 
     def _subscribe_execute_status(self, topic: str) -> None:
         if self._execute_status_sub is not None:
             return
         self._execute_status_sub = self.create_subscription(
-            GoalStatusArray, topic, self._execute_status_cb, 10
+            GoalStatusArray, topic, self._execute_status_cb, self._action_status_qos
         )
         self.get_logger().info(f"Subscribed execute status: {topic}")
 
@@ -192,6 +227,10 @@ class MoveItGoalBridge(Node):
                 "action_msgs/msg/GoalStatusArray" in types
             ):
                 self._subscribe_move_status(name)
+            if self._move_feedback_sub is None and name.endswith("move_action/_action/feedback") and (
+                "moveit_msgs/action/MoveGroup_FeedbackMessage" in types
+            ):
+                self._subscribe_move_feedback(name)
             if self._execute_status_sub is None and name.endswith("execute_trajectory/_action/status") and (
                 "action_msgs/msg/GoalStatusArray" in types
             ):
@@ -227,7 +266,7 @@ class MoveItGoalBridge(Node):
         control_active = True
         if self.publish_on_execute_only:
             # Strict mode: only execute stage can drive real control outputs.
-            control_active = self.execute_active
+            control_active = self.execute_active or self.move_execute_hint
         if not control_active:
             return
 
