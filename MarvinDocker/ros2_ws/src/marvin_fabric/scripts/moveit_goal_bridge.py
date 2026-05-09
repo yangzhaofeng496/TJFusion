@@ -7,7 +7,7 @@ from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import PoseStamped
 from moveit_msgs.action import MoveGroup
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 from visualization_msgs.msg import InteractiveMarkerFeedback, InteractiveMarkerUpdate
 
@@ -92,12 +92,7 @@ class MoveItGoalBridge(Node):
         self._move_feedback_sub = None
         self._execute_status_sub = None
         self._log_once: Set[str] = set()
-        self._action_status_qos = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-        )
+        self._action_status_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
         if self.feedback_topic:
             self._subscribe_feedback(self.feedback_topic)
