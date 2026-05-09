@@ -147,7 +147,7 @@ class MoveItGoalBridge(Node):
         if topic in self._subs:
             return
         self._subs[topic] = self.create_subscription(
-            MoveGroup.FeedbackMessage, topic, self._move_feedback_cb, 10
+            MoveGroup.Impl.FeedbackMessage, topic, self._move_feedback_cb, 10
         )
         self.get_logger().info(f"Subscribed move feedback: {topic}")
 
@@ -157,7 +157,7 @@ class MoveItGoalBridge(Node):
         self._subs[topic] = self.create_subscription(GoalStatusArray, topic, self._execute_status_cb, 10)
         self.get_logger().info(f"Subscribed execute status: {topic}")
 
-    def _move_feedback_cb(self, msg: MoveGroup.FeedbackMessage) -> None:
+    def _move_feedback_cb(self, msg: MoveGroup.Impl.FeedbackMessage) -> None:
         state = str(msg.feedback.state).strip().upper()
         hint = state in {"MONITOR", "EXECUTING"}
         if hint != self.move_execute_hint:
