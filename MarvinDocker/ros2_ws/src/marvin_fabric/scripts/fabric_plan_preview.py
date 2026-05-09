@@ -47,6 +47,7 @@ class FabricPlanPreview(Node):
         self.declare_parameter("joint_cmd_a_topic", "fabric_preview/joint_cmd_A")
         self.declare_parameter("joint_cmd_b_topic", "fabric_preview/joint_cmd_B")
         self.declare_parameter("display_topic", "/display_planned_path")
+        self.declare_parameter("trajectory_topic", "/fabric_preview/trajectory")
         self.declare_parameter("publish_rate_hz", 30.0)
         self.declare_parameter("model_id", "marvin_robot")
 
@@ -55,6 +56,7 @@ class FabricPlanPreview(Node):
         self.joint_cmd_a_topic = str(self.get_parameter("joint_cmd_a_topic").value)
         self.joint_cmd_b_topic = str(self.get_parameter("joint_cmd_b_topic").value)
         self.display_topic = str(self.get_parameter("display_topic").value)
+        self.trajectory_topic = str(self.get_parameter("trajectory_topic").value)
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         self.model_id = str(self.get_parameter("model_id").value)
 
@@ -67,6 +69,7 @@ class FabricPlanPreview(Node):
         self.samples: List[List[float]] = []
 
         self.display_pub = self.create_publisher(DisplayTrajectory, self.display_topic, 10)
+        self.trajectory_pub = self.create_publisher(RobotTrajectory, self.trajectory_topic, 10)
         self.cmd_a_sub = self.create_subscription(Jointcmd, self.joint_cmd_a_topic, self._cmd_a_cb, 10)
         self.cmd_b_sub = self.create_subscription(Jointcmd, self.joint_cmd_b_topic, self._cmd_b_cb, 10)
 
@@ -174,8 +177,10 @@ class FabricPlanPreview(Node):
         msg.trajectory_start.header.stamp = self.get_clock().now().to_msg()
 
         self.display_pub.publish(msg)
+        self.trajectory_pub.publish(rt)
         self.get_logger().info(
-            f"Published Fabric preview trajectory to {self.display_topic} with {len(self.samples)} points."
+            f"Published Fabric preview trajectory to {self.display_topic} and {self.trajectory_topic} "
+            f"with {len(self.samples)} points."
         )
 
 

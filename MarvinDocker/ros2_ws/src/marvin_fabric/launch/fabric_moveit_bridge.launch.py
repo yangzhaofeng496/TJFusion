@@ -4,7 +4,7 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
 from launch.actions import RegisterEventHandler
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -99,7 +99,17 @@ def generate_launch_description():
     )
 
     planner_node = Node(
-        condition=IfCondition(LaunchConfiguration("enable_fabric_control")),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    LaunchConfiguration("enable_fabric_control"),
+                    "' == 'true' and '",
+                    LaunchConfiguration("enable_live_fabric_controller"),
+                    "' == 'true'",
+                ]
+            )
+        ),
         package="marvin_fabric",
         executable="planner_node",
         name="planner_node",
@@ -197,6 +207,11 @@ def generate_launch_description():
         default_value="true",
         description="true: run Fabric planner+bridge (robot can move); false: feedback-to-MoveIt only",
     )
+    enable_live_fabric_controller_arg = DeclareLaunchArgument(
+        "enable_live_fabric_controller",
+        default_value="false",
+        description="true: run live planner_node publishing to /control/joint_cmd_A/B during execute",
+    )
 
     publish_on_execute_only_arg = DeclareLaunchArgument(
         "publish_on_execute_only",
@@ -280,12 +295,31 @@ def generate_launch_description():
             }
         ],
     )
+    execute_relay_node = Node(
+        condition=IfCondition(LaunchConfiguration("enable_fabric_control")),
+        package="marvin_fabric",
+        executable="fabric_execute_relay.py",
+        name="fabric_execute_relay",
+        output="screen",
+        parameters=[
+            {
+                "trajectory_topic": "/fabric_preview/trajectory",
+                "execute_status_topic": "",
+                "out_joint_cmd_a_topic": "/control/joint_cmd_A",
+                "out_joint_cmd_b_topic": "/control/joint_cmd_B",
+                "out_grip_left_topic": "/control/gripL",
+                "out_grip_right_topic": "/control/gripR",
+                "tick_hz": 200.0,
+            }
+        ],
+    )
 
     return LaunchDescription(
         [
             use_real_hardware_arg,
             simulate_robot_motion_arg,
             enable_fabric_control_arg,
+            enable_live_fabric_controller_arg,
             publish_on_execute_only_arg,
             enable_fabric_plan_preview_arg,
             feedback_topic_arg,
@@ -293,6 +327,7 @@ def generate_launch_description():
             planner_node,
             preview_planner_node,
             preview_display_node,
+            execute_relay_node,
             real_hardware_node,
             robot_mode_initializer,
             wait_feedback_node,
