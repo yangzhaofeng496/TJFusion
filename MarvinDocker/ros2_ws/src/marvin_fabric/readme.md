@@ -1,60 +1,45 @@
-# marvin_fabric
+# marvin_fabric (Real Hardware Minimal Mode)
 
-This package provides ROS 2 control functionalities for Marvin robots.
+This package is now configured for a minimal real-hardware execution path with MoveIt.
 
-## Installation
+## Kept Runtime Nodes
 
-1. **Clone the repository:**
-    ```bash
-    cd ~/ros2_ws/src
-    extract the package here
-    ```
+1. `marvin_ros_control/marvin_robot_node`  
+2. `marvin_fabric/robot_mode_initializer.py`  
+3. `marvin_fabric/planner_node`  
+4. `moveit_m6` demo launch (RViz + MoveIt)  
+5. `marvin_fabric/moveit_goal_bridge.py`  
 
-2. **Install dependencies:**
-    ```bash
-    cd ~/ros2_ws
-    rosdep install --from-paths src --ignore-src -r -y
-    ```
+## Launch
 
-3. **Build the workspace:**
-    for x64
-    ```bash
-    colcon build --packages-select marvin_fabric --cmake-args -DCPU_ARCH=x86
-    ```
-    for arm64
-    ```bash
-    colcon build --packages-select marvin_fabric --cmake-args -DCPU_ARCH=arm64
-    ```
-
-4. **Source the workspace:**
-    ```bash
-    source ~/ros2_ws/install/setup.bash
-    ```
-5. **Install the vcan auto start service:**
-    ```bash
-    cd ~/ros2_ws/src/marvin_fabric
-    sudo bash install_van.sh
-    ```
-# control topics
-1. left eef roation constraint
-msg type:
+```bash
+ros2 launch marvin_fabric fabric_moveit_bridge.launch.py
 ```
- control/eef_constraint,  #example [1, 1, 1, 1, 1, 1] constrain rotation by three axis on each tcp.
+
+## Execution Chain
+
+1. In RViz, click **Execute** in MoveIt.
+2. `moveit_goal_bridge` detects execute stage and publishes:
+   - `/control/target_poseL`
+   - `/control/target_poseR`
+   - `/control/gripL`
+   - `/control/gripR`
+3. `planner_node` consumes `/control/target_poseL/R` and publishes:
+   - `/control/joint_cmd_A`
+   - `/control/joint_cmd_B`
+4. `marvin_robot_node` consumes `/control/joint_cmd_A/B` and sends motion to hardware.
+
+## Quick Checks
+
+```bash
+ros2 topic hz /control/target_poseL
+ros2 topic hz /control/target_poseR
+ros2 topic hz /control/joint_cmd_A
+ros2 topic hz /control/joint_cmd_B
+ros2 topic echo /info/arm_state --once
 ```
-2.
-msg type:
-```
- control/speed_scale, #[speed_scale_left, speed_scale_right] int value from 0 to 100.
-```
-control/target_poseL
-control/target_poseR 
-## Usage
 
-Refer to the package documentation and launch files for usage instructions.
+## Notes
 
-## License
-
-See [LICENSE](LICENSE) for details.
-
-
-2025.10.18
+- `Plan` stage does not drive hardware control topics.
+- Real control starts at `Execute` stage.

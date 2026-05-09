@@ -1,131 +1,41 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
-from launch.conditions import IfCondition, UnlessCondition
-from launch.event_handlers import OnProcessExit
-from launch.actions import RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
-import xml.etree.ElementTree as ET
-
-
-JOINT_NAMES = [
-    "Joint1_L",
-    "Joint2_L",
-    "Joint3_L",
-    "Joint4_L",
-    "Joint5_L",
-    "Joint6_L",
-    "Joint7_L",
-    "Joint1_R",
-    "Joint2_R",
-    "Joint3_R",
-    "Joint4_R",
-    "Joint5_R",
-    "Joint6_R",
-    "Joint7_R",
-]
-
-
-def _load_home_positions_from_srdf(moveit_share: str) -> list:
-    srdf_path = os.path.join(moveit_share, "config", "marvin_robot.srdf")
-    fallback = [0.0] * len(JOINT_NAMES)
-    try:
-        root = ET.parse(srdf_path).getroot()
-        home_state = None
-        for group_state in root.findall("group_state"):
-            if (
-                group_state.attrib.get("name") == "home"
-                and group_state.attrib.get("group") == "both_arm"
-            ):
-                home_state = group_state
-                break
-        if home_state is None:
-            return fallback
-
-        value_map = {}
-        for joint in home_state.findall("joint"):
-            name = joint.attrib.get("name")
-            value = joint.attrib.get("value")
-            if name is None or value is None:
-                continue
-            value_map[name] = float(value)
-        return [value_map.get(name, 0.0) for name in JOINT_NAMES]
-    except Exception:
-        return fallback
-
-
-def _make_offline_feedback_node(simulate_motion_cfg, home_positions, *, condition=None) -> Node:
-    return Node(
-        condition=condition,
-        package="marvin_fabric",
-        executable="fabric_offline_feedback.py",
-        name="fabric_offline_feedback",
-        output="screen",
-        parameters=[
-            {
-                "rate_hz": 100.0,
-                "simulate_motion": simulate_motion_cfg,
-                "publish_joint_states": True,
-                "initial_positions": home_positions,
-            }
-        ],
-    )
 
 
 def generate_launch_description():
     fabric_share = get_package_share_directory("marvin_fabric")
     moveit_share = get_package_share_directory("moveit_m6")
     marvin_ros_control_share = get_package_share_directory("marvin_ros_control")
-    config = os.path.join(fabric_share, "config", "robot_param_m6.yaml")
+
+    fabric_config = os.path.join(fabric_share, "config", "robot_param_m6.yaml")
     real_hw_config = os.path.join(marvin_ros_control_share, "config", "robot_param_m6.yaml")
-    home_positions = _load_home_positions_from_srdf(moveit_share)
-    use_real_hardware_cfg = LaunchConfiguration("use_real_hardware")
-    simulate_motion_cfg = LaunchConfiguration("simulate_robot_motion")
+
+    feedback_topic_arg = DeclareLaunchArgument(
+        "feedback_topic",
+        default_value="/rviz_moveit_motion_planning_display/robot_interaction_interactive_marker_topic/feedback",
+        description="MoveIt interactive marker feedback topic",
+    )
+    update_topic_arg = DeclareLaunchArgument(
+        "update_topic",
+        default_value="",
+        description="MoveIt interactive marker update topic, empty means auto-discover",
+    )
+    publish_rate_arg = DeclareLaunchArgument(
+        "publish_rate_hz",
+        default_value="30.0",
+        description="Rate to publish execute-stage target poses",
+    )
 
     moveit_demo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(moveit_share, "launch", "demo.launch.py")
-        ),
-        condition=UnlessCondition(use_real_hardware_cfg),
-    )
-
-    moveit_demo_after_wait = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(moveit_share, "launch", "demo.launch.py")
-        ),
-    )
-
-    planner_node = Node(
-        condition=IfCondition(
-            PythonExpression(
-                [
-                    "'",
-                    LaunchConfiguration("enable_fabric_control"),
-                    "' == 'true' and '",
-                    LaunchConfiguration("enable_live_fabric_controller"),
-                    "' == 'true'",
-                ]
-            )
-        ),
-        package="marvin_fabric",
-        executable="planner_node",
-        name="planner_node",
-        parameters=[config],
-        output="screen",
-        arguments=["--ros-args", "--log-level", "INFO"],
-    )
-
-    offline_feedback = _make_offline_feedback_node(
-        simulate_motion_cfg,
-        home_positions,
-        condition=UnlessCondition(use_real_hardware_cfg),
+        PythonLaunchDescriptionSource(os.path.join(moveit_share, "launch", "demo.launch.py"))
     )
 
     real_hardware_node = Node(
-        condition=IfCondition(use_real_hardware_cfg),
         package="marvin_ros_control",
         executable="marvin_robot_node",
         name="marvin_robot_node",
@@ -135,7 +45,6 @@ def generate_launch_description():
     )
 
     robot_mode_initializer = Node(
-        condition=IfCondition(use_real_hardware_cfg),
         package="marvin_fabric",
         executable="robot_mode_initializer.py",
         name="robot_mode_initializer",
@@ -149,93 +58,16 @@ def generate_launch_description():
         ],
     )
 
-    wait_feedback_node = Node(
-        condition=IfCondition(use_real_hardware_cfg),
+    planner_node = Node(
         package="marvin_fabric",
-        executable="wait_for_joint_feedback.py",
-        name="wait_for_joint_feedback",
+        executable="planner_node",
+        name="planner_node",
+        parameters=[fabric_config],
         output="screen",
-        parameters=[{"topic": "/info/joint_feedback", "timeout_sec": 20.0}],
-    )
-
-    offline_feedback_fallback = _make_offline_feedback_node(
-        simulate_motion_cfg,
-        home_positions,
-    )
-
-    def _on_wait_feedback_exit(event, _context):
-        return_code = getattr(event, "returncode", getattr(event, "return_code", 1))
-        if return_code == 0:
-            return [
-                LogInfo(msg="[fabric_moveit_bridge] Real robot feedback detected, using hardware mode."),
-                moveit_demo_after_wait,
-            ]
-        return [
-            LogInfo(msg="[fabric_moveit_bridge] No robot feedback, falling back to offline mode."),
-            offline_feedback_fallback,
-            moveit_demo_after_wait,
-        ]
-
-    start_moveit_after_feedback = RegisterEventHandler(
-        condition=IfCondition(use_real_hardware_cfg),
-        event_handler=OnProcessExit(
-            target_action=wait_feedback_node,
-            on_exit=_on_wait_feedback_exit,
-        ),
-    )
-
-    feedback_topic_arg = DeclareLaunchArgument(
-        "feedback_topic",
-        default_value="/rviz_moveit_motion_planning_display/robot_interaction_interactive_marker_topic/feedback",
-        description="MoveIt interactive marker feedback topic",
-    )
-
-    use_real_hardware_arg = DeclareLaunchArgument(
-        "use_real_hardware",
-        default_value="true",
-        description="true: try real hardware first and fallback to offline on timeout; false: force offline",
-    )
-
-    simulate_robot_motion_arg = DeclareLaunchArgument(
-        "simulate_robot_motion",
-        default_value="false",
-        description="Only in offline mode: publish sinusoidal mock joint motion data",
-    )
-
-    enable_fabric_control_arg = DeclareLaunchArgument(
-        "enable_fabric_control",
-        default_value="true",
-        description="true: run Fabric planner+bridge (robot can move); false: feedback-to-MoveIt only",
-    )
-    enable_live_fabric_controller_arg = DeclareLaunchArgument(
-        "enable_live_fabric_controller",
-        default_value="true",
-        description="true: run live planner_node for execute-stage pose control",
-    )
-
-    publish_on_execute_only_arg = DeclareLaunchArgument(
-        "publish_on_execute_only",
-        default_value="true",
-        description="true: bridge publishes control only while MoveIt execute action is active",
-    )
-    enable_execute_pose_stream_arg = DeclareLaunchArgument(
-        "enable_execute_pose_stream",
-        default_value="true",
-        description="true: publish /control/target_poseL/R only during execute stage",
-    )
-    enable_fabric_execute_relay_arg = DeclareLaunchArgument(
-        "enable_fabric_execute_relay",
-        default_value="false",
-        description="false: disable direct /control/joint_cmd_A/B replay pipeline",
-    )
-    enable_fabric_plan_preview_arg = DeclareLaunchArgument(
-        "enable_fabric_plan_preview",
-        default_value="true",
-        description="true: run Fabric dry-run preview path generation for MoveIt Plan",
+        arguments=["--ros-args", "--log-level", "INFO"],
     )
 
     moveit_bridge = Node(
-        condition=IfCondition(LaunchConfiguration("enable_fabric_control")),
         package="marvin_fabric",
         executable="moveit_goal_bridge.py",
         name="moveit_goal_bridge",
@@ -243,125 +75,29 @@ def generate_launch_description():
         parameters=[
             {
                 "feedback_topic": LaunchConfiguration("feedback_topic"),
-                "default_side": "right",
-                "publish_rate_hz": 30.0,
-                "output_frame_id": "base_link",
-                "publish_on_execute_only": LaunchConfiguration("publish_on_execute_only"),
-                "publish_preview_on_plan": LaunchConfiguration("enable_fabric_plan_preview"),
-                "publish_preview_always": True,
-                "enable_execute_pose_stream": LaunchConfiguration("enable_execute_pose_stream"),
-                "mirror_preview_to_control_topics": False,
-                "move_action_status_topic": "/move_action/_action/status",
+                "update_topic": LaunchConfiguration("update_topic"),
+                "publish_rate_hz": LaunchConfiguration("publish_rate_hz"),
+                "publish_on_execute_only": True,
+                "enable_execute_pose_stream": True,
                 "move_action_feedback_topic": "/move_action/_action/feedback",
                 "execute_status_topic": "/execute_trajectory/_action/status",
                 "control_target_topic_left": "/control/target_poseL",
                 "control_target_topic_right": "/control/target_poseR",
                 "control_grip_topic_left": "/control/gripL",
                 "control_grip_topic_right": "/control/gripR",
-                "preview_target_topic_left": "fabric_preview/target_poseL",
-                "preview_target_topic_right": "fabric_preview/target_poseR",
-                "preview_grip_topic_left": "fabric_preview/gripL",
-                "preview_grip_topic_right": "fabric_preview/gripR",
-            }
-        ],
-    )
-
-    preview_planner_node = Node(
-        condition=IfCondition(LaunchConfiguration("enable_fabric_plan_preview")),
-        package="marvin_fabric",
-        executable="planner_node",
-        name="planner_node_preview",
-        parameters=[config],
-        remappings=[
-            ("control/target_poseL", "fabric_preview/target_poseL"),
-            ("control/target_poseR", "fabric_preview/target_poseR"),
-            ("control/gripL", "fabric_preview/gripL"),
-            ("control/gripR", "fabric_preview/gripR"),
-            ("control/joint_cmd_A", "fabric_preview/joint_cmd_A"),
-            ("control/joint_cmd_B", "fabric_preview/joint_cmd_B"),
-            ("joint_states", "fabric_preview/joint_states"),
-            ("eef_pose", "fabric_preview/eef_pose"),
-            ("collision_spheres", "fabric_preview/collision_spheres"),
-            ("fabric_markers", "fabric_preview/fabric_markers"),
-            ("arm/eef_state", "fabric_preview/eef_state"),
-            ("info/eef_left", "fabric_preview/eef_left"),
-            ("info/eef_right", "fabric_preview/eef_right"),
-            ("test_pub", "fabric_preview/test_pub"),
-            ("reset_left_arm", "fabric_preview/reset_left_arm"),
-            ("reset_right_arm", "fabric_preview/reset_right_arm"),
-        ],
-        output="screen",
-        arguments=["--ros-args", "--log-level", "INFO"],
-    )
-
-    preview_display_node = Node(
-        condition=IfCondition(LaunchConfiguration("enable_fabric_plan_preview")),
-        package="marvin_fabric",
-        executable="fabric_plan_preview.py",
-        name="fabric_plan_preview",
-        output="screen",
-        parameters=[
-            {
-                "plan_status_topic": "/move_action/_action/status",
-                "execute_status_topic": "/execute_trajectory/_action/status",
-                "joint_cmd_a_topic": "fabric_preview/joint_cmd_A",
-                "joint_cmd_b_topic": "fabric_preview/joint_cmd_B",
-                "display_topic": "/display_planned_path",
-                "publish_rate_hz": 30.0,
-                "model_id": "marvin_robot",
-            }
-        ],
-    )
-    execute_relay_node = Node(
-        condition=IfCondition(
-            PythonExpression(
-                [
-                    "'",
-                    LaunchConfiguration("enable_fabric_control"),
-                    "' == 'true' and '",
-                    LaunchConfiguration("enable_fabric_execute_relay"),
-                    "' == 'true'",
-                ]
-            )
-        ),
-        package="marvin_fabric",
-        executable="fabric_execute_relay.py",
-        name="fabric_execute_relay",
-        output="screen",
-        parameters=[
-            {
-                "trajectory_topic": "/fabric_preview/trajectory",
-                "execute_status_topic": "/execute_trajectory/_action/status",
-                "out_joint_cmd_a_topic": "/control/joint_cmd_A",
-                "out_joint_cmd_b_topic": "/control/joint_cmd_B",
-                "out_grip_left_topic": "/control/gripL",
-                "out_grip_right_topic": "/control/gripR",
-                "tick_hz": 200.0,
             }
         ],
     )
 
     return LaunchDescription(
         [
-            use_real_hardware_arg,
-            simulate_robot_motion_arg,
-            enable_fabric_control_arg,
-            enable_live_fabric_controller_arg,
-            publish_on_execute_only_arg,
-            enable_execute_pose_stream_arg,
-            enable_fabric_execute_relay_arg,
-            enable_fabric_plan_preview_arg,
             feedback_topic_arg,
-            moveit_demo,
-            planner_node,
-            preview_planner_node,
-            preview_display_node,
-            execute_relay_node,
+            update_topic_arg,
+            publish_rate_arg,
             real_hardware_node,
             robot_mode_initializer,
-            wait_feedback_node,
-            start_moveit_after_feedback,
-            offline_feedback,
+            planner_node,
+            moveit_demo,
             moveit_bridge,
         ]
     )
