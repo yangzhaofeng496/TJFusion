@@ -209,14 +209,24 @@ def generate_launch_description():
     )
     enable_live_fabric_controller_arg = DeclareLaunchArgument(
         "enable_live_fabric_controller",
-        default_value="false",
-        description="true: run live planner_node publishing to /control/joint_cmd_A/B during execute",
+        default_value="true",
+        description="true: run live planner_node for execute-stage pose control",
     )
 
     publish_on_execute_only_arg = DeclareLaunchArgument(
         "publish_on_execute_only",
         default_value="true",
         description="true: bridge publishes control only while MoveIt execute action is active",
+    )
+    enable_execute_pose_stream_arg = DeclareLaunchArgument(
+        "enable_execute_pose_stream",
+        default_value="true",
+        description="true: publish /control/target_poseL/R only during execute stage",
+    )
+    enable_fabric_execute_relay_arg = DeclareLaunchArgument(
+        "enable_fabric_execute_relay",
+        default_value="false",
+        description="false: disable direct /control/joint_cmd_A/B replay pipeline",
     )
     enable_fabric_plan_preview_arg = DeclareLaunchArgument(
         "enable_fabric_plan_preview",
@@ -239,8 +249,14 @@ def generate_launch_description():
                 "publish_on_execute_only": LaunchConfiguration("publish_on_execute_only"),
                 "publish_preview_on_plan": LaunchConfiguration("enable_fabric_plan_preview"),
                 "publish_preview_always": True,
+                "enable_execute_pose_stream": LaunchConfiguration("enable_execute_pose_stream"),
+                "mirror_preview_to_control_topics": False,
                 "move_action_status_topic": "",
                 "execute_status_topic": "",
+                "control_target_topic_left": "/control/target_poseL",
+                "control_target_topic_right": "/control/target_poseR",
+                "control_grip_topic_left": "/control/gripL",
+                "control_grip_topic_right": "/control/gripR",
                 "preview_target_topic_left": "fabric_preview/target_poseL",
                 "preview_target_topic_right": "fabric_preview/target_poseR",
                 "preview_grip_topic_left": "fabric_preview/gripL",
@@ -296,7 +312,17 @@ def generate_launch_description():
         ],
     )
     execute_relay_node = Node(
-        condition=IfCondition(LaunchConfiguration("enable_fabric_control")),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    LaunchConfiguration("enable_fabric_control"),
+                    "' == 'true' and '",
+                    LaunchConfiguration("enable_fabric_execute_relay"),
+                    "' == 'true'",
+                ]
+            )
+        ),
         package="marvin_fabric",
         executable="fabric_execute_relay.py",
         name="fabric_execute_relay",
@@ -321,6 +347,8 @@ def generate_launch_description():
             enable_fabric_control_arg,
             enable_live_fabric_controller_arg,
             publish_on_execute_only_arg,
+            enable_execute_pose_stream_arg,
+            enable_fabric_execute_relay_arg,
             enable_fabric_plan_preview_arg,
             feedback_topic_arg,
             moveit_demo,

@@ -35,9 +35,15 @@ class MoveItGoalBridge(Node):
         self.declare_parameter("publish_on_execute_only", True)
         self.declare_parameter("publish_preview_on_plan", True)
         self.declare_parameter("publish_preview_always", True)
+        self.declare_parameter("enable_execute_pose_stream", True)
+        self.declare_parameter("mirror_preview_to_control_topics", False)
         self.declare_parameter("move_action_status_topic", "")
         self.declare_parameter("move_action_feedback_topic", "")
         self.declare_parameter("execute_status_topic", "")
+        self.declare_parameter("control_target_topic_left", "/control/target_poseL")
+        self.declare_parameter("control_target_topic_right", "/control/target_poseR")
+        self.declare_parameter("control_grip_topic_left", "/control/gripL")
+        self.declare_parameter("control_grip_topic_right", "/control/gripR")
         self.declare_parameter("preview_target_topic_left", "fabric_preview/target_poseL")
         self.declare_parameter("preview_target_topic_right", "fabric_preview/target_poseR")
         self.declare_parameter("preview_grip_topic_left", "fabric_preview/gripL")
@@ -51,9 +57,17 @@ class MoveItGoalBridge(Node):
         self.publish_on_execute_only = bool(self.get_parameter("publish_on_execute_only").value)
         self.publish_preview_on_plan = bool(self.get_parameter("publish_preview_on_plan").value)
         self.publish_preview_always = bool(self.get_parameter("publish_preview_always").value)
+        self.enable_execute_pose_stream = bool(self.get_parameter("enable_execute_pose_stream").value)
+        self.mirror_preview_to_control_topics = bool(
+            self.get_parameter("mirror_preview_to_control_topics").value
+        )
         self.move_action_status_topic = str(self.get_parameter("move_action_status_topic").value)
         self.move_action_feedback_topic = str(self.get_parameter("move_action_feedback_topic").value)
         self.execute_status_topic = str(self.get_parameter("execute_status_topic").value)
+        self.control_target_topic_left = str(self.get_parameter("control_target_topic_left").value)
+        self.control_target_topic_right = str(self.get_parameter("control_target_topic_right").value)
+        self.control_grip_topic_left = str(self.get_parameter("control_grip_topic_left").value)
+        self.control_grip_topic_right = str(self.get_parameter("control_grip_topic_right").value)
         self.preview_target_topic_left = str(self.get_parameter("preview_target_topic_left").value)
         self.preview_target_topic_right = str(self.get_parameter("preview_target_topic_right").value)
         self.preview_grip_topic_left = str(self.get_parameter("preview_grip_topic_left").value)
@@ -62,10 +76,10 @@ class MoveItGoalBridge(Node):
         self.execute_active = False
         self.move_execute_hint = False
 
-        self.left_pub = self.create_publisher(PoseStamped, "control/target_poseL", 10)
-        self.right_pub = self.create_publisher(PoseStamped, "control/target_poseR", 10)
-        self.left_grip_pub = self.create_publisher(Bool, "control/gripL", 10)
-        self.right_grip_pub = self.create_publisher(Bool, "control/gripR", 10)
+        self.left_pub = self.create_publisher(PoseStamped, self.control_target_topic_left, 10)
+        self.right_pub = self.create_publisher(PoseStamped, self.control_target_topic_right, 10)
+        self.left_grip_pub = self.create_publisher(Bool, self.control_grip_topic_left, 10)
+        self.right_grip_pub = self.create_publisher(Bool, self.control_grip_topic_right, 10)
         self.preview_left_pub = self.create_publisher(PoseStamped, self.preview_target_topic_left, 10)
         self.preview_right_pub = self.create_publisher(PoseStamped, self.preview_target_topic_right, 10)
         self.preview_left_grip_pub = self.create_publisher(Bool, self.preview_grip_topic_left, 10)
@@ -106,6 +120,8 @@ class MoveItGoalBridge(Node):
             f"explicit_update='{self.update_topic}', publish_on_execute_only={self.publish_on_execute_only}, "
             f"publish_preview_on_plan={self.publish_preview_on_plan}, "
             f"publish_preview_always={self.publish_preview_always}, "
+            f"enable_execute_pose_stream={self.enable_execute_pose_stream}, "
+            f"mirror_preview_to_control_topics={self.mirror_preview_to_control_topics}, "
             f"move_action_status_topic='{self.move_action_status_topic}', "
             f"move_action_feedback_topic='{self.move_action_feedback_topic}', "
             f"execute_status_topic='{self.execute_status_topic}'"
@@ -267,8 +283,19 @@ class MoveItGoalBridge(Node):
                 self.preview_left_pub,
                 self.preview_right_pub,
             )
+            if self.mirror_preview_to_control_topics:
+                self._publish_grips(self.left_grip_pub, self.right_grip_pub)
+                self._publish_targets(
+                    self.left_pose,
+                    self.right_pose,
+                    self.left_pub,
+                    self.right_pub,
+                )
 
         # Real control path (to Fabric planner that drives hardware path).
+        if not self.enable_execute_pose_stream:
+            return
+
         control_active = True
         if self.publish_on_execute_only:
             # Strict mode: only execute stage can drive real control outputs.
