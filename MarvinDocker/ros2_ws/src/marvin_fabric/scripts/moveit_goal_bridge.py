@@ -9,7 +9,7 @@ from moveit_msgs.action import MoveGroup
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
-from visualization_msgs.msg import InteractiveMarkerFeedback, InteractiveMarkerUpdate
+from visualization_msgs.msg import InteractiveMarkerFeedback, InteractiveMarkerInit, InteractiveMarkerUpdate
 
 
 def _guess_side(marker_name: str) -> str:
@@ -129,6 +129,10 @@ class MoveItGoalBridge(Node):
         for p in msg.poses:
             self._apply_pose(p.name, p.header.frame_id, p.pose)
 
+    def _init_cb(self, msg: InteractiveMarkerInit) -> None:
+        for marker in msg.markers:
+            self._apply_pose(marker.name, marker.header.frame_id, marker.pose)
+
     def _apply_pose(self, marker_name: str, frame_id: str, pose_raw) -> None:
         pose = PoseStamped()
         pose.header.frame_id = frame_id if frame_id else self.output_frame_id
@@ -161,6 +165,13 @@ class MoveItGoalBridge(Node):
         sub = self.create_subscription(InteractiveMarkerUpdate, topic, self._update_cb, 10)
         self._subs[topic] = sub
         self.get_logger().info(f"Subscribed update: {topic}")
+
+    def _subscribe_update_full(self, topic: str) -> None:
+        if topic in self._subs:
+            return
+        sub = self.create_subscription(InteractiveMarkerInit, topic, self._init_cb, 10)
+        self._subs[topic] = sub
+        self.get_logger().info(f"Subscribed update_full: {topic}")
 
     def _subscribe_move_status(self, topic: str) -> None:
         if self._move_status_sub is not None:
@@ -228,15 +239,20 @@ class MoveItGoalBridge(Node):
             if name in self._subs:
                 continue
             if (
-                name.endswith("robot_interaction_interactive_marker_topic/feedback")
-                and "visualization_msgs/msg/InteractiveMarkerFeedback" in types
+                "visualization_msgs/msg/InteractiveMarkerFeedback" in types
+                and "interactive_marker_topic" in name
             ):
                 self._subscribe_feedback(name)
             if (
-                name.endswith("robot_interaction_interactive_marker_topic/update")
-                and "visualization_msgs/msg/InteractiveMarkerUpdate" in types
+                "visualization_msgs/msg/InteractiveMarkerUpdate" in types
+                and "interactive_marker_topic" in name
             ):
                 self._subscribe_update(name)
+            if (
+                "visualization_msgs/msg/InteractiveMarkerInit" in types
+                and "interactive_marker_topic" in name
+            ):
+                self._subscribe_update_full(name)
             if self._move_status_sub is None and name.endswith("move_action/_action/status") and (
                 "action_msgs/msg/GoalStatusArray" in types
             ):
@@ -296,6 +312,14 @@ class MoveItGoalBridge(Node):
             # Strict mode: only execute stage can drive real control outputs.
             control_active = self.execute_active or self.move_execute_hint
         if not control_active:
+            return
+
+        if self.left_pose is None and self.right_pose is None:
+            # Useful runtime hint when execute is active but marker pose source is missing.
+            self.get_logger().warn(
+                "Execute is active but no marker pose received yet; "
+                "waiting for interactive marker feedback/update topics."
+            )
             return
 
         self._publish_grips(self.left_grip_pub, self.right_grip_pub)
