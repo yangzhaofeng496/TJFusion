@@ -251,8 +251,9 @@ def generate_launch_description():
                 "publish_preview_always": True,
                 "enable_execute_pose_stream": LaunchConfiguration("enable_execute_pose_stream"),
                 "mirror_preview_to_control_topics": False,
-                "move_action_status_topic": "",
-                "execute_status_topic": "",
+                "move_action_status_topic": "/move_action/_action/status",
+                "move_action_feedback_topic": "/move_action/_action/feedback",
+                "execute_status_topic": "/execute_trajectory/_action/status",
                 "control_target_topic_left": "/control/target_poseL",
                 "control_target_topic_right": "/control/target_poseR",
                 "control_grip_topic_left": "/control/gripL",
@@ -301,8 +302,8 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "plan_status_topic": "",
-                "execute_status_topic": "",
+                "plan_status_topic": "/move_action/_action/status",
+                "execute_status_topic": "/execute_trajectory/_action/status",
                 "joint_cmd_a_topic": "fabric_preview/joint_cmd_A",
                 "joint_cmd_b_topic": "fabric_preview/joint_cmd_B",
                 "display_topic": "/display_planned_path",
@@ -330,7 +331,7 @@ def generate_launch_description():
         parameters=[
             {
                 "trajectory_topic": "/fabric_preview/trajectory",
-                "execute_status_topic": "",
+                "execute_status_topic": "/execute_trajectory/_action/status",
                 "out_joint_cmd_a_topic": "/control/joint_cmd_A",
                 "out_joint_cmd_b_topic": "/control/joint_cmd_B",
                 "out_grip_left_topic": "/control/gripL",

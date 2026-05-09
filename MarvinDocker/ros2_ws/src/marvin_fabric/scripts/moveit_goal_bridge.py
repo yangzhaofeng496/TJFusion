@@ -88,9 +88,6 @@ class MoveItGoalBridge(Node):
         self.left_pose = None
         self.right_pose = None
         self._subs: Dict[str, object] = {}
-        self._move_status_sub = None
-        self._move_feedback_sub = None
-        self._execute_status_sub = None
         self._log_once: Set[str] = set()
         self._action_status_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
@@ -174,9 +171,9 @@ class MoveItGoalBridge(Node):
         self.get_logger().info(f"Subscribed update_full: {topic}")
 
     def _subscribe_move_status(self, topic: str) -> None:
-        if self._move_status_sub is not None:
+        if topic in self._subs:
             return
-        self._move_status_sub = self.create_subscription(
+        self._subs[topic] = self.create_subscription(
             GoalStatusArray, topic, self._move_status_cb, self._action_status_qos
         )
         self.get_logger().info(f"Subscribed move action status: {topic}")
@@ -197,9 +194,9 @@ class MoveItGoalBridge(Node):
         self.get_logger().info(f"Move action active -> {self.move_action_active}")
 
     def _subscribe_move_feedback(self, topic: str) -> None:
-        if self._move_feedback_sub is not None:
+        if topic in self._subs:
             return
-        self._move_feedback_sub = self.create_subscription(
+        self._subs[topic] = self.create_subscription(
             MoveGroup.FeedbackMessage, topic, self._move_feedback_cb, 10
         )
         self.get_logger().info(f"Subscribed move action feedback: {topic}")
@@ -214,9 +211,9 @@ class MoveItGoalBridge(Node):
         self.get_logger().info(f"Move execute hint -> {self.move_execute_hint} (state='{state}')")
 
     def _subscribe_execute_status(self, topic: str) -> None:
-        if self._execute_status_sub is not None:
+        if topic in self._subs:
             return
-        self._execute_status_sub = self.create_subscription(
+        self._subs[topic] = self.create_subscription(
             GoalStatusArray, topic, self._execute_status_cb, self._action_status_qos
         )
         self.get_logger().info(f"Subscribed execute status: {topic}")
@@ -253,15 +250,15 @@ class MoveItGoalBridge(Node):
                 and "interactive_marker_topic" in name
             ):
                 self._subscribe_update_full(name)
-            if self._move_status_sub is None and name.endswith("move_action/_action/status") and (
+            if ("move_action/_action/status" in name) and (
                 "action_msgs/msg/GoalStatusArray" in types
             ):
                 self._subscribe_move_status(name)
-            if self._move_feedback_sub is None and name.endswith("move_action/_action/feedback") and (
+            if ("move_action/_action/feedback" in name) and (
                 "moveit_msgs/action/MoveGroup_FeedbackMessage" in types
             ):
                 self._subscribe_move_feedback(name)
-            if self._execute_status_sub is None and name.endswith("execute_trajectory/_action/status") and (
+            if ("execute_trajectory/_action/status" in name) and (
                 "action_msgs/msg/GoalStatusArray" in types
             ):
                 self._subscribe_execute_status(name)
