@@ -49,6 +49,7 @@ class FabricPlanPreview(Node):
         self.declare_parameter("display_topic", "/display_planned_path")
         self.declare_parameter("trajectory_topic", "/fabric_preview/trajectory")
         self.declare_parameter("publish_rate_hz", 30.0)
+        self.declare_parameter("republish_cached_display_hz", 2.0)
         self.declare_parameter("model_id", "marvin_robot")
 
         self.plan_status_topic = str(self.get_parameter("plan_status_topic").value)
@@ -58,6 +59,7 @@ class FabricPlanPreview(Node):
         self.display_topic = str(self.get_parameter("display_topic").value)
         self.trajectory_topic = str(self.get_parameter("trajectory_topic").value)
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
+        self.republish_cached_display_hz = float(self.get_parameter("republish_cached_display_hz").value)
         self.model_id = str(self.get_parameter("model_id").value)
 
         self.plan_active = False
@@ -67,6 +69,9 @@ class FabricPlanPreview(Node):
         self.latest_a: Optional[List[float]] = None
         self.latest_b: Optional[List[float]] = None
         self.samples: List[List[float]] = []
+        self.last_fabric_display: Optional[DisplayTrajectory] = None
+        self.last_fabric_rt: Optional[RobotTrajectory] = None
+        self._last_republish_time = self.get_clock().now()
 
         self.display_pub = self.create_publisher(DisplayTrajectory, self.display_topic, 10)
         self.trajectory_pub = self.create_publisher(RobotTrajectory, self.trajectory_topic, 10)
@@ -142,6 +147,7 @@ class FabricPlanPreview(Node):
             self._publish_preview_if_ready()
 
         if not self.capture_active:
+            self._republish_cached_display_if_needed()
             return
         if self.latest_a is None or self.latest_b is None:
             return
@@ -176,12 +182,35 @@ class FabricPlanPreview(Node):
         msg.trajectory_start.position = list(self.samples[0])
         msg.trajectory_start.header.stamp = self.get_clock().now().to_msg()
 
+        self.last_fabric_display = msg
+        self.last_fabric_rt = rt
+        self._last_republish_time = self.get_clock().now()
         self.display_pub.publish(msg)
         self.trajectory_pub.publish(rt)
         self.get_logger().info(
             f"Published Fabric preview trajectory to {self.display_topic} and {self.trajectory_topic} "
             f"with {len(self.samples)} points."
         )
+
+    def _republish_cached_display_if_needed(self) -> None:
+        if self.last_fabric_display is None or self.last_fabric_rt is None:
+            return
+        if self.execute_active:
+            return
+        hz = max(0.0, self.republish_cached_display_hz)
+        if hz <= 0.0:
+            return
+        now = self.get_clock().now()
+        period_sec = 1.0 / hz
+        elapsed_sec = (now - self._last_republish_time).nanoseconds * 1e-9
+        if elapsed_sec < period_sec:
+            return
+
+        # Keep MoveIt display topic pinned to latest Fabric trajectory.
+        self.last_fabric_display.trajectory_start.header.stamp = now.to_msg()
+        self.display_pub.publish(self.last_fabric_display)
+        self.trajectory_pub.publish(self.last_fabric_rt)
+        self._last_republish_time = now
 
 
 def main() -> None:
